@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACC Telemetry Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #ff4444;
+            font-size: 2.5em;
+        }
+        
+        .upload-section {
+            background: #2a2a2a;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .upload-btn {
+            background: #ff4444;
+            color: white;
+            padding: 15px 40px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1.1em;
+            transition: background 0.3s;
+        }
+        
+        .upload-btn:hover {
+            background: #cc0000;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .info-card {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #ff4444;
+        }
+        
+        .info-card h3 {
+            color: #ff4444;
+            margin-bottom: 10px;
+            font-size: 0.9em;
+            text-transform: uppercase;
+        }
+        
+        .info-card .value {
+            font-size: 1.8em;
+            font-weight: bold;
+        }
+        
+        .chart-container {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .chart-container h2 {
+            color: #ff4444;
+            margin-bottom: 15px;
+        }
+        
+        canvas {
+            max-height: 400px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .timeline-controls {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .timeline-slider {
+            width: 100%;
+            margin: 10px 0;
+        }
+        
+        .time-display {
+            text-align: center;
+            font-size: 1.5em;
+            color: #ff4444;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏎️ ACC Telemetry Viewer</h1>
+        
+        <div class="upload-section">
+            <label for="fileInput" class="upload-btn">📂 Cargar archivo telemetry.json</label>
+            <input type="file" id="fileInput" class="file-input" accept=".json">
+            <p id="fileName" style="margin-top: 15px; color: #888;"></p>
+        </div>
+        
+        <div id="dashboard" class="hidden">
+            <div class="timeline-controls">
+                <h2>Timeline</h2>
+                <div class="time-display" id="timeDisplay">00:00</div>
+                <input type="range" id="timelineSlider" class="timeline-slider" min="0" max="100" value="0">
+                <div style="display: flex; justify-content: space-between; margin-top: 10px;">
+                    <span id="startTime">00:00</span>
+                    <span id="endTime">00:00</span>
+                </div>
+            </div>
+            
+            <div class="info-grid">
+                <div class="info-card">
+                    <h3>Velocidad</h3>
+                    <div class="value" id="currentSpeed">0 km/h</div>
+                </div>
+                <div class="info-card">
+                    <h3>RPM</h3>
+                    <div class="value" id="currentRPM">0</div>
+                </div>
+                <div class="info-card">
+                    <h3>Marcha</h3>
+                    <div class="value" id="currentGear">N</div>
+                </div>
+                <div class="info-card">
+                    <h3>Combustible</h3>
+                    <div class="value" id="currentFuel">0 L</div>
+                </div>
+                <div class="info-card" style="border-left-color: #ffaa00;">
+                    <h3>G Lateral</h3>
+                    <div class="value" id="currentGLat">0.00 G</div>
+                </div>
+                <div class="info-card" style="border-left-color: #ff00ff;">
+                    <h3>G Longitudinal</h3>
+                    <div class="value" id="currentGLong">0.00 G</div>
+                </div>
+                <div class="info-card" style="border-left-color: #ff0000;">
+                    <h3>Bloqueos Activos</h3>
+                    <div class="value" id="currentLocks">0</div>
+                </div>
+                <div class="info-card" style="border-left-color: #00ff00;">
+                    <h3>Temp. Frenos Máx</h3>
+                    <div class="value" id="currentBrakeTemp">0°C</div>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <h2>Velocidad y RPM</h2>
+                <canvas id="speedChart"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h2>Inputs (Acelerador/Freno/Volante)</h2>
+                <canvas id="inputsChart"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h2>Fuerzas G</h2>
+                <canvas id="gForceChart"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h2>Bloqueos de Rueda (Wheel Slip)</h2>
+                <canvas id="wheelSlipChart"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h2>Mapa de Bloqueos</h2>
+                <canvas id="wheelLockMap"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h2>Temperatura de Neumáticos</h2>
+                <canvas id="tyresTempChart"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h2>Temperatura de Frenos</h2>
+                <canvas id="brakesTempChart"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h2>Carga de Ruedas</h2>
+                <canvas id="wheelLoadChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let telemetryData = [];
+        let charts = {};
+        
+        // Cargar archivo
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            document.getElementById('fileName').textContent = `Cargando: ${file.name}...`;
+            
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                try {
+                    telemetryData = JSON.parse(event.target.result);
+                    document.getElementById('fileName').textContent = `✓ Cargado: ${file.name} (${telemetryData.length} registros)`;
+                    initDashboard();
+                } catch (error) {
+                    alert('Error al leer el archivo JSON: ' + error.message);
+                }
+            };
+            reader.readAsText(file);
+        });
+        
+        function initDashboard() {
+            document.getElementById('dashboard').classList.remove('hidden');
+            
+            // Configurar timeline
+            const slider = document.getElementById('timelineSlider');
+            slider.max = telemetryData.length - 1;
+            slider.value = 0;
+            
+            updateTimeDisplay(0);
+            
+            slider.addEventListener('input', function() {
+                const index = parseInt(this.value);
+                updateCurrentData(index);
+                updateTimeDisplay(index);
+            });
+            
+            // Crear gráficos
+            createCharts();
+            updateCurrentData(0);
+        }
+        
+        function updateTimeDisplay(index) {
+            const seconds = telemetryData[index].second;
+            const minutes = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            document.getElementById('timeDisplay').textContent = 
+                `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+            
+            const totalSeconds = telemetryData[telemetryData.length - 1].second;
+            const totalMinutes = Math.floor(totalSeconds / 60);
+            const totalSecs = totalSeconds % 60;
+            document.getElementById('endTime').textContent = 
+                `${String(totalMinutes).padStart(2, '0')}:${String(totalSecs).padStart(2, '0')}`;
+        }
+        
+        function updateCurrentData(index) {
+            const data = telemetryData[index];
+            const telemetry = data.player_telemetry;
+            
+            if (telemetry) {
+                document.getElementById('currentSpeed').textContent = `${telemetry.speed_kmh} km/h`;
+                document.getElementById('currentRPM').textContent = telemetry.rpm;
+                document.getElementById('currentGear').textContent = telemetry.gear === 0 ? 'N' : telemetry.gear;
+                document.getElementById('currentFuel').textContent = `${telemetry.fuel} L`;
+                
+                // Nuevos datos
+                if (telemetry.g_force) {
+                    document.getElementById('currentGLat').textContent = `${telemetry.g_force.lateral.toFixed(2)} G`;
+                    document.getElementById('currentGLong').textContent = `${telemetry.g_force.longitudinal.toFixed(2)} G`;
+                }
+                
+                // Contar bloqueos activos
+                let lockCount = 0;
+                if (telemetry.tyres && telemetry.tyres.locked) {
+                    lockCount = Object.values(telemetry.tyres.locked).filter(l => l).length;
+                }
+                document.getElementById('currentLocks').textContent = lockCount;
+                document.getElementById('currentLocks').parentElement.style.borderLeftColor = 
+                    lockCount > 0 ? '#ff0000' : '#00ff00';
+                
+                // Temperatura máxima de frenos
+                if (telemetry.brakes && telemetry.brakes.temperature) {
+                    const maxBrakeTemp = Math.max(
+                        telemetry.brakes.temperature.front_left,
+                        telemetry.brakes.temperature.front_right,
+                        telemetry.brakes.temperature.rear_left,
+                        telemetry.brakes.temperature.rear_right
+                    );
+                    document.getElementById('currentBrakeTemp').textContent = `${maxBrakeTemp.toFixed(0)}°C`;
+                }
+            }
+        }
+        
+        function createCharts() {
+            const labels = telemetryData.map(d => d.second);
+            
+            // Velocidad y RPM
+            const ctx1 = document.getElementById('speedChart').getContext('2d');
+            charts.speed = new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Velocidad (km/h)',
+                            data: telemetryData.map(d => d.player_telemetry?.speed_kmh || 0),
+                            borderColor: '#ff4444',
+                            backgroundColor: 'rgba(255, 68, 68, 0.1)',
+                            tension: 0.4,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'RPM',
+                            data: telemetryData.map(d => d.player_telemetry?.rpm || 0),
+                            borderColor: '#4444ff',
+                            backgroundColor: 'rgba(68, 68, 255, 0.1)',
+                            tension: 0.4,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            position: 'right',
+                            ticks: { color: '#fff' },
+                            grid: { display: false }
+                        },
+                        x: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#fff' } }
+                    }
+                }
+            });
+            
+            // Inputs
+            const ctx2 = document.getElementById('inputsChart').getContext('2d');
+            charts.inputs = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Acelerador',
+                            data: telemetryData.map(d => d.player_telemetry?.gas || 0),
+                            borderColor: '#00ff00',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Freno',
+                            data: telemetryData.map(d => d.player_telemetry?.brake || 0),
+                            borderColor: '#ff0000',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Volante (abs)',
+                            data: telemetryData.map(d => Math.abs(d.player_telemetry?.steer_angle || 0) / 100),
+                            borderColor: '#ffff00',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 1,
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        },
+                        x: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#fff' } }
+                    }
+                }
+            });
+            
+            // Fuerzas G
+            const ctx3 = document.getElementById('gForceChart').getContext('2d');
+            charts.gforce = new Chart(ctx3, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'G Lateral',
+                            data: telemetryData.map(d => d.player_telemetry?.g_force?.lateral || 0),
+                            borderColor: '#ffaa00',
+                            backgroundColor: 'rgba(255, 170, 0, 0.1)',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'G Longitudinal',
+                            data: telemetryData.map(d => d.player_telemetry?.g_force?.longitudinal || 0),
+                            borderColor: '#ff00ff',
+                            backgroundColor: 'rgba(255, 0, 255, 0.1)',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        y: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        },
+                        x: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#fff' } }
+                    }
+                }
+            });
+            
+            // Wheel Slip (Bloqueos)
+            const ctx4 = document.getElementById('wheelSlipChart').getContext('2d');
+            charts.wheelSlip = new Chart(ctx4, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Del. Izq.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.slip?.front_left || 0),
+                            borderColor: '#ff0000',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Del. Der.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.slip?.front_right || 0),
+                            borderColor: '#ff6600',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Tras. Izq.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.slip?.rear_left || 0),
+                            borderColor: '#00ff00',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Tras. Der.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.slip?.rear_right || 0),
+                            borderColor: '#00ffff',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        y: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        },
+                        x: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#fff' } },
+                        annotation: {
+                            annotations: {
+                                lockThreshold: {
+                                    type: 'line',
+                                    yMin: 1.2,
+                                    yMax: 1.2,
+                                    borderColor: 'red',
+                                    borderWidth: 2,
+                                    borderDash: [5, 5],
+                                    label: {
+                                        content: 'Umbral de bloqueo',
+                                        enabled: true,
+                                        position: 'end'
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Mapa de bloqueos (scatter/bar)
+            const ctx5 = document.getElementById('wheelLockMap').getContext('2d');
+            const lockData = telemetryData.map((d, i) => {
+                const locks = d.player_telemetry?.tyres?.locked;
+                if (!locks) return 0;
+                let count = 0;
+                if (locks.front_left) count++;
+                if (locks.front_right) count++;
+                if (locks.rear_left) count++;
+                if (locks.rear_right) count++;
+                return count;
+            });
+            
+            charts.lockMap = new Chart(ctx5, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Ruedas Bloqueadas',
+                            data: lockData,
+                            backgroundColor: lockData.map(v => {
+                                if (v === 0) return 'rgba(0, 255, 0, 0.3)';
+                                if (v <= 2) return 'rgba(255, 165, 0, 0.6)';
+                                return 'rgba(255, 0, 0, 0.8)';
+                            }),
+                            borderColor: lockData.map(v => {
+                                if (v === 0) return '#00ff00';
+                                if (v <= 2) return '#ffaa00';
+                                return '#ff0000';
+                            }),
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 4,
+                            ticks: { 
+                                color: '#fff',
+                                stepSize: 1
+                            },
+                            grid: { color: '#444' }
+                        },
+                        x: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#fff' } }
+                    }
+                }
+            });
+            
+            // Temperaturas de neumáticos
+            const ctx6 = document.getElementById('tyresTempChart').getContext('2d');
+            charts.tyres = new Chart(ctx6, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Del. Izq.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.temperature?.front_left || 0),
+                            borderColor: '#ff00ff',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Del. Der.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.temperature?.front_right || 0),
+                            borderColor: '#00ffff',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Tras. Izq.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.temperature?.rear_left || 0),
+                            borderColor: '#ff66ff',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Tras. Der.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.temperature?.rear_right || 0),
+                            borderColor: '#66ffff',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        y: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        },
+                        x: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#fff' } }
+                    }
+                }
+            });
+            
+            // Temperaturas de frenos
+            const ctx7 = document.getElementById('brakesTempChart').getContext('2d');
+            charts.brakes = new Chart(ctx7, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Freno Del. Izq.',
+                            data: telemetryData.map(d => d.player_telemetry?.brakes?.temperature?.front_left || 0),
+                            borderColor: '#ff0000',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Freno Del. Der.',
+                            data: telemetryData.map(d => d.player_telemetry?.brakes?.temperature?.front_right || 0),
+                            borderColor: '#ff6600',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Freno Tras. Izq.',
+                            data: telemetryData.map(d => d.player_telemetry?.brakes?.temperature?.rear_left || 0),
+                            borderColor: '#ffaa00',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Freno Tras. Der.',
+                            data: telemetryData.map(d => d.player_telemetry?.brakes?.temperature?.rear_right || 0),
+                            borderColor: '#ffdd00',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        y: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        },
+                        x: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#fff' } }
+                    }
+                }
+            });
+            
+            // Carga de ruedas
+            const ctx8 = document.getElementById('wheelLoadChart').getContext('2d');
+            charts.wheelLoad = new Chart(ctx8, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Carga Del. Izq.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.load?.front_left || 0),
+                            borderColor: '#8800ff',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Carga Del. Der.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.load?.front_right || 0),
+                            borderColor: '#aa00ff',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Carga Tras. Izq.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.load?.rear_left || 0),
+                            borderColor: '#00ff88',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Carga Tras. Der.',
+                            data: telemetryData.map(d => d.player_telemetry?.tyres?.load?.rear_right || 0),
+                            borderColor: '#00ffaa',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        y: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        },
+                        x: {
+                            ticks: { color: '#fff' },
+                            grid: { color: '#444' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#fff' } }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
