@@ -1,0 +1,14 @@
+# ACC Race Recorder - Dependencias de Python
+
+# GUI
+tkinter-tooltip==3.1.0  # Tooltips para la interfaz (tkinter viene con Python)
+
+# Monitoreo de procesos
+psutil==5.9.8
+
+# Opcional: Para implementación completa de standings con Broadcasting SDK
+# accbroadcasting==0.1.0  # Descomenta si quieres implementar standings completos
+
+# Nota: FFmpeg debe instalarse por separado
+# Descarga: https://ffmpeg.org/download.html
+# Asegúrate de añadir FFmpeg al PATH de Windows
