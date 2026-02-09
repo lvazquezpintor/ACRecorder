@@ -1,7 +1,10 @@
 # ACC Race Recorder - Dependencias de Python
 
-# GUI
+# GUI Tkinter
 tkinter-tooltip==3.1.0  # Tooltips para la interfaz (tkinter viene con Python)
+
+# GUI Qt (moderna)
+PySide6==6.6.1  # Framework Qt6 para GUI moderna
 
 # Monitoreo de procesos
 psutil==5.9.8
