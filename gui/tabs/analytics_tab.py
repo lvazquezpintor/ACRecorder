@@ -45,7 +45,7 @@ class AnalyticsTab(QWidget):
         
         # Info
         self.telemetry_info = QLabel("No telemetry loaded")
-        self.telemetry_info.setStyleSheet("color: #718096; font-size: 14px;")
+        self.telemetry_info.setStyleSheet("color: #718096; font-size: 14px; background: transparent; border: none;")
         layout.addWidget(self.telemetry_info)
         
         # Stats panel
@@ -95,7 +95,7 @@ class AnalyticsTab(QWidget):
                 data = json.load(f)
             
             self.telemetry_info.setText(f"✓ Loaded: {filepath.name} ({len(data)} records)")
-            self.telemetry_info.setStyleSheet(f"color: {COLORS['accent_green']}; font-size: 14px; font-weight: 500;")
+            self.telemetry_info.setStyleSheet(f"color: {COLORS['accent_green']}; font-size: 14px; font-weight: 500; background: transparent; border: none;")
             
             self.generate_stats(data)
             

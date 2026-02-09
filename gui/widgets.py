@@ -149,10 +149,22 @@ class DataCard(QFrame):
         layout.setSpacing(8)
         
         label_widget = QLabel(label)
-        label_widget.setStyleSheet("color: #718096; font-size: 12px; font-weight: 500;")
+        label_widget.setStyleSheet("""
+            color: #718096;
+            font-size: 12px;
+            font-weight: 500;
+            background: transparent;
+            border: none;
+        """)
         
         self.value_widget = QLabel(value)
-        self.value_widget.setStyleSheet("color: #2D3748; font-size: 20px; font-weight: 600;")
+        self.value_widget.setStyleSheet("""
+            color: #2D3748;
+            font-size: 20px;
+            font-weight: 600;
+            background: transparent;
+            border: none;
+        """)
         
         layout.addWidget(label_widget)
         layout.addWidget(self.value_widget)

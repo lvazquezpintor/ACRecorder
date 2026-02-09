@@ -9,7 +9,7 @@ from pathlib import Path
 import json
 
 from gui.widgets import ModernButton
-from gui.styles import COLORS, PANEL_STYLE, PANEL_TITLE_STYLE, COMBO_BOX_STYLE
+from gui.styles import COLORS, PANEL_STYLE, PANEL_TITLE_STYLE, COMBO_BOX_STYLE, SETTING_LABEL_STYLE, HINT_LABEL_STYLE
 
 
 class SettingsTab(QWidget):
@@ -73,7 +73,8 @@ class SettingsTab(QWidget):
         # FPS
         fps_row = QHBoxLayout()
         fps_label = QLabel("FPS:")
-        fps_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 14px; min-width: 120px;")
+        fps_label.setStyleSheet(SETTING_LABEL_STYLE)
+        fps_label.setMinimumWidth(120)
         self.fps_combo = QComboBox()
         self.fps_combo.addItems(['24', '30', '60'])
         self.fps_combo.setCurrentText(self.fps_var)
@@ -86,13 +87,14 @@ class SettingsTab(QWidget):
         # CRF
         crf_row = QHBoxLayout()
         crf_label = QLabel("Quality (CRF):")
-        crf_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 14px; min-width: 120px;")
+        crf_label.setStyleSheet(SETTING_LABEL_STYLE)
+        crf_label.setMinimumWidth(120)
         self.crf_combo = QComboBox()
         self.crf_combo.addItems(['18', '23', '28'])
         self.crf_combo.setCurrentText(self.crf_var)
         self.crf_combo.setStyleSheet(COMBO_BOX_STYLE)
         crf_hint = QLabel("(18=High, 23=Medium, 28=Low)")
-        crf_hint.setStyleSheet(f"color: {COLORS['text_light']}; font-size: 12px;")
+        crf_hint.setStyleSheet(HINT_LABEL_STYLE)
         crf_row.addWidget(crf_label)
         crf_row.addWidget(self.crf_combo)
         crf_row.addWidget(crf_hint)
@@ -102,7 +104,8 @@ class SettingsTab(QWidget):
         # Preset
         preset_row = QHBoxLayout()
         preset_label = QLabel("Preset:")
-        preset_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 14px; min-width: 120px;")
+        preset_label.setStyleSheet(SETTING_LABEL_STYLE)
+        preset_label.setMinimumWidth(120)
         self.preset_combo = QComboBox()
         self.preset_combo.addItems(['ultrafast', 'fast', 'medium'])
         self.preset_combo.setCurrentText(self.preset_var)
@@ -130,7 +133,8 @@ class SettingsTab(QWidget):
         
         interval_row = QHBoxLayout()
         interval_label = QLabel("Interval (sec):")
-        interval_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 14px; min-width: 120px;")
+        interval_label.setStyleSheet(SETTING_LABEL_STYLE)
+        interval_label.setMinimumWidth(120)
         self.interval_combo = QComboBox()
         self.interval_combo.addItems(['0.5', '1', '2'])
         self.interval_combo.setCurrentText(self.interval_var)
@@ -158,7 +162,7 @@ class SettingsTab(QWidget):
         
         dir_row = QHBoxLayout()
         self.output_dir_label = QLabel(str(self.output_dir))
-        self.output_dir_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 13px;")
+        self.output_dir_label.setStyleSheet("color: #4A5568; font-size: 13px; background: transparent; border: none;")
         btn_change = ModernButton("Change")
         btn_change.clicked.connect(self.change_output_dir)
         dir_row.addWidget(self.output_dir_label)

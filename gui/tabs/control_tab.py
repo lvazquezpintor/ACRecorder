@@ -7,7 +7,7 @@ from PySide6.QtCore import Signal
 from datetime import datetime
 
 from gui.widgets import ModernButton, StatusIndicator, DataCard
-from gui.styles import COLORS, PANEL_STYLE, PANEL_TITLE_STYLE, TEXT_EDIT_STYLE
+from gui.styles import COLORS, PANEL_STYLE, PANEL_TITLE_STYLE, TEXT_EDIT_STYLE, STATUS_LABEL_STYLE
 
 
 class ControlTab(QWidget):
@@ -58,7 +58,7 @@ class ControlTab(QWidget):
         status_row = QHBoxLayout()
         self.status_indicator = StatusIndicator(COLORS['status_offline'])
         self.status_text = QLabel("System Offline")
-        self.status_text.setStyleSheet("color: #4A5568; font-size: 15px; font-weight: 500; margin-left: 8px;")
+        self.status_text.setStyleSheet(STATUS_LABEL_STYLE)
         
         status_row.addWidget(self.status_indicator)
         status_row.addWidget(self.status_text)

@@ -29,7 +29,15 @@ PANEL_STYLE = """
     }
 """
 
-PANEL_TITLE_STYLE = "color: #2D3748; font-size: 18px; font-weight: 600;"
+# Título de panel sin borde/fondo
+PANEL_TITLE_STYLE = """
+    color: #2D3748; 
+    font-size: 18px; 
+    font-weight: 600;
+    background: transparent;
+    border: none;
+    padding: 0;
+"""
 
 TEXT_EDIT_STYLE = """
     QTextEdit {
@@ -43,14 +51,59 @@ TEXT_EDIT_STYLE = """
     }
 """
 
+# ComboBox mejorado con dropdown bonito
 COMBO_BOX_STYLE = """
     QComboBox {
-        background-color: #F7FAFC;
+        background-color: white;
         border: 1px solid #E2E8F0;
-        border-radius: 6px;
-        padding: 8px 12px;
+        border-radius: 8px;
+        padding: 10px 16px;
         color: #2D3748;
-        font-size: 13px;
+        font-size: 14px;
+        min-width: 200px;
+    }
+    QComboBox:hover {
+        border-color: #CBD5E0;
+        background-color: #F7FAFC;
+    }
+    QComboBox:focus {
+        border-color: #4299E1;
+        background-color: white;
+    }
+    QComboBox::drop-down {
+        border: none;
+        width: 30px;
+    }
+    QComboBox::down-arrow {
+        image: none;
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-top: 6px solid #718096;
+        margin-right: 8px;
+    }
+    QComboBox::down-arrow:hover {
+        border-top-color: #2D3748;
+    }
+    QComboBox QAbstractItemView {
+        background-color: white;
+        border: 1px solid #E2E8F0;
+        border-radius: 8px;
+        padding: 4px;
+        selection-background-color: #EDF2F7;
+        selection-color: #2D3748;
+        outline: none;
+    }
+    QComboBox QAbstractItemView::item {
+        padding: 8px 16px;
+        border-radius: 6px;
+        min-height: 32px;
+    }
+    QComboBox QAbstractItemView::item:hover {
+        background-color: #F7FAFC;
+    }
+    QComboBox QAbstractItemView::item:selected {
+        background-color: #EDF2F7;
+        color: #2D3748;
     }
 """
 
@@ -95,4 +148,33 @@ SIDEBAR_STYLE = """
         background-color: white;
         border-right: 1px solid #E2E8F0;
     }
+"""
+
+# Estilo para labels de configuración (sin borde)
+SETTING_LABEL_STYLE = """
+    color: #4A5568;
+    font-size: 14px;
+    font-weight: 500;
+    background: transparent;
+    border: none;
+    padding: 0;
+"""
+
+# Estilo para labels de hint (texto pequeño)
+HINT_LABEL_STYLE = """
+    color: #A0AEC0;
+    font-size: 12px;
+    background: transparent;
+    border: none;
+    padding: 0;
+"""
+
+# Estilo para label de status
+STATUS_LABEL_STYLE = """
+    color: #4A5568;
+    font-size: 15px;
+    font-weight: 500;
+    background: transparent;
+    border: none;
+    margin-left: 8px;
 """

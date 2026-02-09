@@ -118,7 +118,7 @@ class MainWindow(QMainWindow):
         
         # Footer
         version = QLabel("VERSION 1.0.1")
-        version.setStyleSheet(f"color: {COLORS['text_light']}; font-size: 11px; padding: 20px;")
+        version.setStyleSheet(f"color: {COLORS['text_light']}; font-size: 11px; padding: 20px; background: transparent; border: none;")
         version.setAlignment(Qt.AlignCenter)
         layout.addWidget(version)
         
@@ -144,7 +144,7 @@ class MainWindow(QMainWindow):
         avatar.setFixedSize(64, 64)
         
         title = QLabel("ACC\nRECORDER")
-        title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 16px; font-weight: 700; margin-top: 12px;")
+        title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 16px; font-weight: 700; margin-top: 12px; background: transparent; border: none;")
         title.setAlignment(Qt.AlignCenter)
         
         layout.addWidget(avatar, alignment=Qt.AlignCenter)
@@ -200,7 +200,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         
         self.page_title = QLabel("System Status")
-        self.page_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 24px; font-weight: 700;")
+        self.page_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 24px; font-weight: 700; background: transparent; border: none;")
         
         layout.addWidget(self.page_title)
         layout.addStretch()
@@ -220,6 +220,7 @@ class MainWindow(QMainWindow):
         search_layout.setContentsMargins(12, 8, 12, 8)
         
         search_icon = QLabel("🔍")
+        search_icon.setStyleSheet("background: transparent; border: none;")
         search_input = QLineEdit()
         search_input.setPlaceholderText("Find here...")
         search_input.setStyleSheet(SEARCH_INPUT_STYLE)
