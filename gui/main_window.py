@@ -14,6 +14,7 @@ import time
 from gui.widgets import SidebarButton
 from gui.tabs import ControlTab, SessionsTab, AnalyticsTab, SettingsTab
 from gui.styles import COLORS, SIDEBAR_STYLE, SEARCH_INPUT_STYLE
+from core import TelemetryRecorder, ScreenRecorder
 
 try:
     import psutil
@@ -29,17 +30,23 @@ class MainWindow(QMainWindow):
         
         # Estado de la aplicación
         self.is_monitoring = False
-        self.is_recording = False
         self.monitor_thread = None
-        self.recording_thread = None
-        self.telemetry_thread = None
-        self.ffmpeg_process = None
-        self.recording_start_time = None
         self.output_dir = Path.home() / "ACC_Recordings"
-        self.current_session_dir = None
-        self.telemetry_data = []
-        
         self.output_dir.mkdir(exist_ok=True)
+        
+        # Inicializar grabadores
+        self.telemetry_recorder = TelemetryRecorder(self.output_dir)
+        self.screen_recorder = ScreenRecorder(self.output_dir)
+        
+        # Configurar callbacks de telemetría
+        self.telemetry_recorder.on_recording_started = self._on_telemetry_started
+        self.telemetry_recorder.on_recording_stopped = self._on_telemetry_stopped
+        self.telemetry_recorder.on_telemetry_update = self._on_telemetry_update
+        
+        # Configurar callbacks de grabación de pantalla
+        self.screen_recorder.on_recording_started = self._on_screen_started
+        self.screen_recorder.on_recording_stopped = self._on_screen_stopped
+        self.screen_recorder.on_error = self._on_screen_error
         
         # Setup
         self.setWindowTitle("ACC Race Recorder")
@@ -252,6 +259,15 @@ class MainWindow(QMainWindow):
     def on_config_saved(self, config: dict):
         """Callback cuando se guarda la configuración"""
         self.output_dir = Path(config['output_dir'])
+        
+        # Actualizar directorios de los grabadores
+        self.telemetry_recorder.output_dir = self.output_dir
+        self.screen_recorder.output_dir = self.output_dir
+        
+        # Actualizar configuración de screen recorder si existe
+        if 'screen_recorder' in config:
+            self.screen_recorder.configure(**config['screen_recorder'])
+        
         self.control_tab.log("✓ Configuration updated")
         
     # ========== Métodos de control ==========
@@ -270,7 +286,7 @@ class MainWindow(QMainWindow):
         """Detiene el monitoreo"""
         self.is_monitoring = False
         
-        if self.is_recording:
+        if self.telemetry_recorder.is_recording:
             self.stop_recording()
             
         self.control_tab.set_monitoring_active(False)
@@ -289,10 +305,10 @@ class MainWindow(QMainWindow):
             try:
                 acc_running = self.is_acc_running()
                 
-                if acc_running and not self.is_recording:
+                if acc_running and not self.telemetry_recorder.is_recording:
                     self.control_tab.log("⚑ ACC detected - Starting recording")
                     self.start_recording()
-                elif not acc_running and self.is_recording:
+                elif not acc_running and self.telemetry_recorder.is_recording:
                     self.control_tab.log("ACC closed - Stopping recording")
                     self.stop_recording()
                     
@@ -316,37 +332,41 @@ class MainWindow(QMainWindow):
         
     def start_recording(self):
         """Inicia la grabación"""
-        self.is_recording = True
-        self.recording_start_time = datetime.now()
-        
-        session_name = self.recording_start_time.strftime("ACC_%Y%m%d_%H%M%S")
-        self.current_session_dir = self.output_dir / session_name
-        self.current_session_dir.mkdir(exist_ok=True)
-        
-        self.control_tab.set_status("Recording Active", COLORS['status_recording'])
-        self.control_tab.update_session_name(session_name)
-        self.control_tab.log(f"🔴 Recording started: {session_name}")
-        
-        self.telemetry_data = []
+        try:
+            # Crear nombre de sesión
+            session_name = datetime.now().strftime("ACC_%Y%m%d_%H%M%S")
+            
+            # Iniciar grabación de telemetría
+            session_dir = self.telemetry_recorder.start_recording(session_name)
+            
+            # Iniciar grabación de pantalla
+            video_filename = f"{session_name}.mp4"
+            self.screen_recorder.start_recording(video_filename)
+            
+            self.control_tab.set_status("Recording Active", COLORS['status_recording'])
+            self.control_tab.update_session_name(session_name)
+            
+        except Exception as e:
+            self.control_tab.log(f"❌ Error starting recording: {str(e)}")
         
     def stop_recording(self):
         """Detiene la grabación"""
-        if not self.is_recording:
+        if not self.telemetry_recorder.is_recording:
             return
             
-        self.is_recording = False
         self.control_tab.log("⏹ Stopping recording...")
         
-        # Guardar telemetría
-        if self.telemetry_data and self.current_session_dir:
-            import json
-            telemetry_file = self.current_session_dir / "telemetry.json"
-            with open(telemetry_file, 'w', encoding='utf-8') as f:
-                json.dump(self.telemetry_data, f, indent=2, ensure_ascii=False)
-            self.control_tab.log(f"✓ Telemetry saved: {len(self.telemetry_data)} records")
+        # Detener grabación de pantalla
+        try:
+            self.screen_recorder.stop_recording()
+        except Exception as e:
+            self.control_tab.log(f"⚠ Error stopping screen recording: {str(e)}")
         
-        duration = (datetime.now() - self.recording_start_time).total_seconds()
-        self.control_tab.log(f"✓ Recording completed ({duration:.0f}s)")
+        # Detener grabación de telemetría
+        try:
+            self.telemetry_recorder.stop_recording()
+        except Exception as e:
+            self.control_tab.log(f"⚠ Error stopping telemetry recording: {str(e)}")
         
         self.control_tab.set_status("System Monitoring", COLORS['status_monitoring'])
         self.control_tab.update_session_name("—")
@@ -355,11 +375,40 @@ class MainWindow(QMainWindow):
         
     def update_duration(self):
         """Actualiza el contador de duración"""
-        if self.is_recording and self.recording_start_time:
-            elapsed = datetime.now() - self.recording_start_time
-            hours = int(elapsed.total_seconds() // 3600)
-            minutes = int((elapsed.total_seconds() % 3600) // 60)
-            seconds = int(elapsed.total_seconds() % 60)
+        if self.telemetry_recorder.is_recording:
+            stats = self.telemetry_recorder.get_current_stats()
+            
+            elapsed = stats['duration']
+            hours = int(elapsed // 3600)
+            minutes = int((elapsed % 3600) // 60)
+            seconds = int(elapsed % 60)
             
             self.control_tab.update_duration(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-            self.control_tab.update_records(len(self.telemetry_data))
+            self.control_tab.update_records(stats['records_count'])
+    
+    # ========== Callbacks de grabadores ==========
+    
+    def _on_telemetry_started(self, session_name: str):
+        """Callback cuando inicia la grabación de telemetría"""
+        self.control_tab.log(f"🔴 Telemetry recording started: {session_name}")
+    
+    def _on_telemetry_stopped(self, records_count: int, duration: float):
+        """Callback cuando finaliza la grabación de telemetría"""
+        self.control_tab.log(f"✓ Telemetry saved: {records_count} records ({duration:.0f}s)")
+    
+    def _on_telemetry_update(self, data: dict):
+        """Callback cuando se actualiza la telemetría"""
+        # Aquí se podría actualizar UI en tiempo real si se necesita
+        pass
+    
+    def _on_screen_started(self, output_file: str):
+        """Callback cuando inicia la grabación de pantalla"""
+        self.control_tab.log(f"🎥 Screen recording started: {Path(output_file).name}")
+    
+    def _on_screen_stopped(self, duration: float):
+        """Callback cuando finaliza la grabación de pantalla"""
+        self.control_tab.log(f"✓ Screen recording completed ({duration:.0f}s)")
+    
+    def _on_screen_error(self, error_msg: str):
+        """Callback cuando hay un error en la grabación de pantalla"""
+        self.control_tab.log(f"❌ Screen recorder error: {error_msg}")
