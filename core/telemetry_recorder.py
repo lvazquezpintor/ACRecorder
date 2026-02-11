@@ -72,9 +72,12 @@ class TelemetryRecorder:
         
         return self.current_session_dir
     
-    def stop_recording(self) -> tuple[int, float]:
+    def stop_recording(self, keep_data: bool = False) -> tuple[int, float]:
         """
         Detiene la grabación y guarda los datos
+        
+        Args:
+            keep_data: Si es True, mantiene los datos en memoria después de guardar
         
         Returns:
             Tupla con (número de registros, duración en segundos)
@@ -103,8 +106,9 @@ class TelemetryRecorder:
         if self.on_recording_stopped:
             self.on_recording_stopped(records_count, duration)
         
-        # Limpiar
-        self.telemetry_data = []
+        # Limpiar (pero mantener datos si se solicita)
+        if not keep_data:
+            self.telemetry_data = []
         self.current_session_dir = None
         self.recording_start_time = None
         
@@ -189,30 +193,49 @@ class TelemetryRecorder:
         except Exception as e:
             raise IOError(f"Error al cargar telemetría: {str(e)}")
     
-    def export_csv(self, filepath: Path, fields: Optional[List[str]] = None) -> None:
+    def export_csv(self, filepath: Path, fields: Optional[List[str]] = None, data: Optional[List[Dict[str, Any]]] = None) -> None:
         """
-        Exporta la telemetría actual a formato CSV
+        Exporta la telemetría a formato CSV
         
         Args:
             filepath: Ruta donde guardar el CSV
             fields: Lista de campos a exportar (None = todos)
+            data: Datos a exportar (None = usar telemetry_data actual)
         """
-        if not self.telemetry_data:
+        # Usar datos proporcionados o los datos actuales
+        export_data = data if data is not None else self.telemetry_data
+        
+        if not export_data:
             raise ValueError("No hay datos de telemetría para exportar")
         
         import csv
         
         # Determinar campos
         if not fields:
-            fields = list(self.telemetry_data[0].keys())
+            fields = list(export_data[0].keys())
         
         try:
             with open(filepath, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=fields)
                 writer.writeheader()
                 
-                for record in self.telemetry_data:
+                for record in export_data:
                     row = {k: record.get(k, '') for k in fields}
                     writer.writerow(row)
         except Exception as e:
             raise IOError(f"Error al exportar CSV: {str(e)}")
+    
+    def export_json_to_csv(self, json_filepath: Path, csv_filepath: Path, fields: Optional[List[str]] = None) -> None:
+        """
+        Convierte un archivo JSON de telemetría a CSV
+        
+        Args:
+            json_filepath: Ruta al archivo JSON de telemetría
+            csv_filepath: Ruta donde guardar el CSV
+            fields: Lista de campos a exportar (None = todos)
+        """
+        # Cargar datos del JSON
+        data = self.load_telemetry(json_filepath)
+        
+        # Exportar a CSV
+        self.export_csv(csv_filepath, fields=fields, data=data)

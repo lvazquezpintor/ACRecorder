@@ -91,6 +91,16 @@ class ACCTelemetry:
             last_time = struct.unpack('i', data[16:20])[0]
             best_time = struct.unpack('i', data[20:24])[0]
             
+            # Offset 24: completedLaps (int) - Vueltas completadas
+            completed_laps = struct.unpack('i', data[24:28])[0]
+            
+            # Offset 28: position (int) - Posición en carrera
+            position = struct.unpack('i', data[28:32])[0]
+            
+            # Offset 48: normalizedCarPosition (float) - Posición en el circuito (0.0 - 1.0)
+            # 0.0 = línea de meta, 0.5 = mitad del circuito, 1.0 = vuelta completa
+            normalized_position = struct.unpack('f', data[48:52])[0]
+            
             return {
                 'packet_id': packet_id,
                 'status': statuses.get(status, 'Unknown'),
@@ -98,6 +108,9 @@ class ACCTelemetry:
                 'current_time_ms': current_time,
                 'last_lap_time_ms': last_time,
                 'best_lap_time_ms': best_time,
+                'completed_laps': completed_laps,
+                'position': position,
+                'normalized_position': round(normalized_position, 4),  # Posición 0.0-1.0 en el circuito
                 'is_valid_lap': data[52] == 1,  # Offset 52: isValidLap (byte)
             }
             
@@ -313,9 +326,17 @@ class ACCTelemetry:
             # Nombre de la pista (string en offset 62, 50 chars)
             track_name = static_data[62:112].decode('utf-8', errors='ignore').rstrip('\x00')
             
+            # Offset aproximado 116: trackSPlineLength (float) - Longitud del circuito en metros
+            # Este offset puede variar según la versión de ACC
+            try:
+                track_length = struct.unpack('f', static_data[116:120])[0]
+            except:
+                track_length = 0.0  # Si no se puede leer, usar 0
+            
             return {
                 'car_model': car_model,
                 'track_name': track_name,
+                'track_length_m': round(track_length, 1),  # Longitud del circuito en metros
                 'max_rpm': max_rpm,
                 'max_fuel': round(max_fuel, 1)
             }

@@ -8,7 +8,7 @@ import time
 import platform
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, List
 
 
 class ScreenRecorder:
@@ -38,13 +38,18 @@ class ScreenRecorder:
             'crf': 23,
             'audio': True,
             'audio_codec': 'aac',
-            'audio_bitrate': '128k'
+            'audio_bitrate': '128k',
+            'pixel_format': 'yuv420p',  # Compatibilidad con reproductores
+            'capture_cursor': True  # Capturar cursor del mouse
         }
         
         # Callbacks
         self.on_recording_started: Optional[Callable[[str], None]] = None
         self.on_recording_stopped: Optional[Callable[[float], None]] = None
         self.on_error: Optional[Callable[[str], None]] = None
+        
+        # Cache de dispositivos para macOS
+        self._macos_devices_cache: Optional[Dict[str, List[str]]] = None
         
     def configure(self, **kwargs) -> None:
         """
@@ -59,6 +64,8 @@ class ScreenRecorder:
             audio: Capturar audio (default: True)
             audio_codec: Codec de audio (default: aac)
             audio_bitrate: Bitrate de audio (default: 128k)
+            pixel_format: Formato de píxel (default: yuv420p)
+            capture_cursor: Capturar cursor (default: True)
         """
         self.config.update(kwargs)
     
@@ -94,6 +101,10 @@ class ScreenRecorder:
         cmd = self._build_ffmpeg_command()
         
         try:
+            # Log del comando para debugging
+            if self.on_error:
+                self.on_error(f"DEBUG: Ejecutando comando: {' '.join(cmd)}")
+            
             # Iniciar proceso ffmpeg
             self.ffmpeg_process = subprocess.Popen(
                 cmd,
@@ -102,6 +113,18 @@ class ScreenRecorder:
                 stderr=subprocess.PIPE,
                 creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == 'Windows' else 0
             )
+            
+            # Dar tiempo a ffmpeg para iniciar y detectar errores inmediatos
+            time.sleep(0.5)
+            
+            # Verificar si el proceso sigue vivo
+            if self.ffmpeg_process.poll() is not None:
+                # El proceso terminó inmediatamente - hay un error
+                stderr = self.ffmpeg_process.stderr.read().decode('utf-8', errors='ignore')
+                error_msg = f"ffmpeg falló al iniciar: {stderr[-1000:]}"
+                if self.on_error:
+                    self.on_error(error_msg)
+                raise RuntimeError(error_msg)
             
             self.is_recording = True
             
@@ -140,7 +163,12 @@ class ScreenRecorder:
         
         try:
             # Enviar señal de terminación a ffmpeg (q para quit)
-            self.ffmpeg_process.communicate(input=b'q', timeout=5)
+            if platform.system() == 'Darwin':
+                # En macOS, usar SIGINT es más confiable
+                self.ffmpeg_process.send_signal(subprocess.signal.SIGINT)
+                self.ffmpeg_process.wait(timeout=5)
+            else:
+                self.ffmpeg_process.communicate(input=b'q', timeout=5)
         except subprocess.TimeoutExpired:
             # Si no responde, forzar terminación
             self.ffmpeg_process.kill()
@@ -199,6 +227,72 @@ class ScreenRecorder:
         except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
             return False
     
+    def _get_macos_devices(self) -> Dict[str, List[str]]:
+        """
+        Obtiene la lista de dispositivos disponibles en macOS
+        
+        Returns:
+            Diccionario con listas de dispositivos de video y audio
+        """
+        if self._macos_devices_cache:
+            return self._macos_devices_cache
+        
+        try:
+            result = subprocess.run(
+                ['ffmpeg', '-f', 'avfoundation', '-list_devices', 'true', '-i', ''],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5
+            )
+            
+            output = result.stderr.decode('utf-8', errors='ignore')
+            
+            video_devices = []
+            audio_devices = []
+            current_section = None
+            
+            for line in output.split('\n'):
+                if 'AVFoundation video devices:' in line:
+                    current_section = 'video'
+                elif 'AVFoundation audio devices:' in line:
+                    current_section = 'audio'
+                elif current_section and '[AVFoundation' in line and ']' in line:
+                    # Extraer nombre del dispositivo
+                    device_name = line.split(']')[1].strip()
+                    if current_section == 'video':
+                        video_devices.append(device_name)
+                    elif current_section == 'audio':
+                        audio_devices.append(device_name)
+            
+            self._macos_devices_cache = {
+                'video': video_devices,
+                'audio': audio_devices
+            }
+            
+            return self._macos_devices_cache
+            
+        except Exception as e:
+            if self.on_error:
+                self.on_error(f"Error obteniendo dispositivos macOS: {str(e)}")
+            return {'video': [], 'audio': []}
+    
+    def _get_macos_screen_index(self) -> str:
+        """
+        Obtiene el índice de captura de pantalla para macOS
+        
+        Returns:
+            String con el índice de captura (ej: "0", "1", "Capture screen 0")
+        """
+        devices = self._get_macos_devices()
+        
+        # Buscar dispositivo de captura de pantalla
+        for i, device in enumerate(devices['video']):
+            if 'Capture screen' in device or 'Screen' in device:
+                return str(i)
+        
+        # Si no se encuentra, intentar con índice 1 (valor común)
+        return "1"
+    
     def _build_ffmpeg_command(self) -> list:
         """
         Construye el comando ffmpeg según la plataforma y configuración
@@ -209,14 +303,21 @@ class ScreenRecorder:
         system = platform.system()
         cmd = ['ffmpeg']
         
+        # Sobrescribir archivo sin preguntar
+        cmd.append('-y')
+        
         # Configuración de entrada según plataforma
         if system == 'Windows':
             # Windows: captura con gdigrab
             cmd.extend([
                 '-f', 'gdigrab',
                 '-framerate', str(self.config['fps']),
-                '-i', 'desktop'
             ])
+            
+            if self.config['capture_cursor']:
+                cmd.extend(['-draw_mouse', '1'])
+            
+            cmd.extend(['-i', 'desktop'])
             
             # Audio en Windows
             if self.config['audio']:
@@ -226,20 +327,46 @@ class ScreenRecorder:
                 ])
                 
         elif system == 'Darwin':  # macOS
-            # macOS: captura con avfoundation
-            cmd.extend([
-                '-f', 'avfoundation',
-                '-framerate', str(self.config['fps']),
-                '-i', '1:0' if self.config['audio'] else '1'  # 1=pantalla, 0=audio
-            ])
+            # Obtener índice de pantalla
+            screen_index = self._get_macos_screen_index()
+            
+            # Opciones de captura para macOS
+            cmd.extend(['-f', 'avfoundation'])
+            
+            # Framerate
+            cmd.extend(['-framerate', str(self.config['fps'])])
+            
+            # Capturar cursor
+            if self.config['capture_cursor']:
+                cmd.extend(['-capture_cursor', '1'])
+            
+            # Capturar clicks del mouse
+            cmd.extend(['-capture_mouse_clicks', '1'])
+            
+            # Dispositivo de entrada (pantalla:audio)
+            if self.config['audio']:
+                # Intentar obtener dispositivo de audio
+                devices = self._get_macos_devices()
+                if devices['audio']:
+                    # Usar primer dispositivo de audio disponible
+                    cmd.extend(['-i', f"{screen_index}:0"])
+                else:
+                    # Sin audio si no hay dispositivos
+                    cmd.extend(['-i', screen_index])
+            else:
+                cmd.extend(['-i', screen_index])
             
         else:  # Linux
             # Linux: captura con x11grab
             cmd.extend([
                 '-f', 'x11grab',
                 '-framerate', str(self.config['fps']),
-                '-i', ':0.0'
             ])
+            
+            if self.config['capture_cursor']:
+                cmd.extend(['-draw_mouse', '1'])
+            
+            cmd.extend(['-i', ':0.0'])
             
             # Audio en Linux
             if self.config['audio']:
@@ -252,7 +379,8 @@ class ScreenRecorder:
         cmd.extend([
             '-c:v', self.config['codec'],
             '-preset', self.config['preset'],
-            '-crf', str(self.config['crf'])
+            '-crf', str(self.config['crf']),
+            '-pix_fmt', self.config['pixel_format']
         ])
         
         # Resolución si se especifica
@@ -294,6 +422,18 @@ class ScreenRecorder:
                 break
             
             time.sleep(1)
+    
+    def list_macos_devices(self) -> Dict[str, List[str]]:
+        """
+        Lista los dispositivos disponibles en macOS
+        
+        Returns:
+            Diccionario con listas de dispositivos de video y audio
+        """
+        if platform.system() != 'Darwin':
+            return {'video': [], 'audio': []}
+        
+        return self._get_macos_devices()
     
     def get_video_info(self, video_path: Path) -> Optional[Dict[str, Any]]:
         """

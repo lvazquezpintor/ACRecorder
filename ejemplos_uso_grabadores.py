@@ -101,7 +101,7 @@ def ejemplo_telemetria_callbacks():
 # =============================================================================
 
 def ejemplo_exportar_csv():
-    """Ejemplo de exportación de telemetría a CSV"""
+    """Ejemplo de exportación de telemetría a CSV (2 métodos)"""
     print("=== EJEMPLO 3: Exportar a CSV ===\n")
     
     output_dir = Path("./ejemplos_output")
@@ -109,7 +109,7 @@ def ejemplo_exportar_csv():
     
     # Grabar algunos datos
     print("Grabando datos de telemetría...")
-    recorder.start_recording("ejemplo_csv")
+    session_dir = recorder.start_recording("ejemplo_csv")
     
     for i in range(20):
         data = {
@@ -122,12 +122,20 @@ def ejemplo_exportar_csv():
         }
         recorder.add_telemetry_record(data)
     
-    recorder.stop_recording()
-    
-    # Exportar a CSV
-    csv_file = output_dir / "telemetria_ejemplo.csv"
-    print(f"\nExportando a CSV: {csv_file}")
+    # MÉTODO 1: Mantener datos en memoria
+    print("\nMétodo 1: Exportar manteniendo datos en memoria")
+    recorder.stop_recording(keep_data=True)
+    csv_file = output_dir / "telemetria_ejemplo_metodo1.csv"
+    print(f"Exportando a CSV: {csv_file}")
     recorder.export_csv(csv_file, fields=['time', 'speed', 'rpm', 'gear'])
+    print("✓ CSV creado exitosamente")
+    
+    # MÉTODO 2: Cargar desde JSON guardado
+    print("\nMétodo 2: Exportar desde JSON guardado")
+    json_file = session_dir / "telemetry.json"
+    csv_file = output_dir / "telemetria_ejemplo_metodo2.csv"
+    print(f"Convirtiendo {json_file.name} a CSV")
+    recorder.export_json_to_csv(json_file, csv_file, fields=['time', 'speed', 'rpm', 'gear'])
     print("✓ CSV creado exitosamente\n")
 
 
@@ -300,6 +308,8 @@ if __name__ == "__main__":
         print("\n\n⚠️  Ejemplos interrumpidos por el usuario")
     except Exception as e:
         print(f"\n\n❌ Error durante los ejemplos: {e}")
+        import traceback
+        traceback.print_exc()
     
     print("\n" + "="*70)
     print("FIN DE LOS EJEMPLOS")

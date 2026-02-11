@@ -8,18 +8,17 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from pathlib import Path
 from datetime import datetime
-import threading
-import time
+import sys
+import os
+
+# Añadir el directorio raíz al path para imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from gui.widgets import SidebarButton
 from gui.tabs import ControlTab, SessionsTab, AnalyticsTab, SettingsTab
 from gui.styles import COLORS, SIDEBAR_STYLE, SEARCH_INPUT_STYLE
-from core import TelemetryRecorder, ScreenRecorder
-
-try:
-    import psutil
-except ImportError:
-    psutil = None
+from core import TelemetryRecorder, ScreenRecorder, ACCSessionMonitor, SessionStatus
+from acc_telemetry import ACCTelemetry
 
 
 class MainWindow(QMainWindow):
@@ -30,13 +29,18 @@ class MainWindow(QMainWindow):
         
         # Estado de la aplicación
         self.is_monitoring = False
-        self.monitor_thread = None
         self.output_dir = Path.home() / "ACC_Recordings"
         self.output_dir.mkdir(exist_ok=True)
+        
+        # Inicializar telemetría de ACC
+        self.acc_telemetry = ACCTelemetry()
         
         # Inicializar grabadores
         self.telemetry_recorder = TelemetryRecorder(self.output_dir)
         self.screen_recorder = ScreenRecorder(self.output_dir)
+        
+        # Inicializar monitor de sesiones
+        self.session_monitor = ACCSessionMonitor(self.acc_telemetry)
         
         # Configurar callbacks de telemetría
         self.telemetry_recorder.on_recording_started = self._on_telemetry_started
@@ -48,14 +52,19 @@ class MainWindow(QMainWindow):
         self.screen_recorder.on_recording_stopped = self._on_screen_stopped
         self.screen_recorder.on_error = self._on_screen_error
         
+        # Configurar callbacks del monitor de sesiones
+        self.session_monitor.on_race_started = self._on_race_started
+        self.session_monitor.on_race_ended = self._on_race_ended
+        self.session_monitor.on_status_changed = self._on_status_changed
+        
         # Setup
         self.setWindowTitle("ACC Race Recorder")
         self.setMinimumSize(1200, 800)
         self.setup_ui()
         
-        # Timer para actualizar duración
+        # Timer para actualizar duración y telemetría
         self.timer = QTimer()
-        self.timer.timeout.connect(self.update_duration)
+        self.timer.timeout.connect(self.update_ui)
         self.timer.start(1000)
         
     def setup_ui(self):
@@ -124,7 +133,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(nav_layout)
         
         # Footer
-        version = QLabel("VERSION 1.0.1")
+        version = QLabel("VERSION 1.0.2")
         version.setStyleSheet(f"color: {COLORS['text_light']}; font-size: 11px; padding: 20px; background: transparent; border: none;")
         version.setAlignment(Qt.AlignCenter)
         layout.addWidget(version)
@@ -273,68 +282,45 @@ class MainWindow(QMainWindow):
     # ========== Métodos de control ==========
     
     def start_monitoring(self):
-        """Inicia el monitoreo"""
+        """Inicia el monitoreo de sesiones de ACC"""
         self.is_monitoring = True
         self.control_tab.set_monitoring_active(True)
-        self.control_tab.set_status("System Monitoring", COLORS['status_monitoring'])
-        self.control_tab.log("✓ Monitoring started - Waiting for ACC...")
+        self.control_tab.set_status("Waiting for Race", COLORS['status_monitoring'])
+        self.control_tab.log("✓ Monitoring started - Waiting for ACC race to begin...")
         
-        self.monitor_thread = threading.Thread(target=self.monitor_acc, daemon=True)
-        self.monitor_thread.start()
+        # Iniciar monitor de sesiones
+        if self.session_monitor.start_monitoring():
+            self.control_tab.log("✓ Connected to ACC telemetry")
+        else:
+            self.control_tab.log("⚠ Could not connect to ACC - Make sure the game is running")
         
     def stop_monitoring(self):
         """Detiene el monitoreo"""
         self.is_monitoring = False
         
+        # Detener grabación si está activa
         if self.telemetry_recorder.is_recording:
             self.stop_recording()
-            
+        
+        # Detener monitor de sesiones
+        self.session_monitor.stop_monitoring()
+        
         self.control_tab.set_monitoring_active(False)
         self.control_tab.set_status("System Offline", COLORS['status_offline'])
         self.control_tab.log("✗ Monitoring stopped")
         
-    def monitor_acc(self):
-        """Monitorea el proceso ACC"""
-        self.control_tab.log("ACC monitoring thread started...")
+    def start_recording(self, race_data: dict):
+        """
+        Inicia la grabación cuando comienza una carrera
         
-        if not psutil:
-            self.control_tab.log("⚠ psutil not installed - cannot monitor ACC")
-            return
-        
-        while self.is_monitoring:
-            try:
-                acc_running = self.is_acc_running()
-                
-                if acc_running and not self.telemetry_recorder.is_recording:
-                    self.control_tab.log("⚑ ACC detected - Starting recording")
-                    self.start_recording()
-                elif not acc_running and self.telemetry_recorder.is_recording:
-                    self.control_tab.log("ACC closed - Stopping recording")
-                    self.stop_recording()
-                    
-            except Exception as e:
-                self.control_tab.log(f"Error: {str(e)}")
-            
-            time.sleep(2)
-        
-    def is_acc_running(self) -> bool:
-        """Verifica si ACC está corriendo"""
-        if not psutil:
-            return False
-            
-        for proc in psutil.process_iter(['name']):
-            try:
-                if 'AC2' in proc.info['name'] or 'Assetto' in proc.info['name']:
-                    return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-        return False
-        
-    def start_recording(self):
-        """Inicia la grabación"""
+        Args:
+            race_data: Información sobre la carrera que comienza
+        """
         try:
-            # Crear nombre de sesión
-            session_name = datetime.now().strftime("ACC_%Y%m%d_%H%M%S")
+            # Crear nombre de sesión basado en tipo de sesión
+            session_type = race_data.get('session_type', 'Race')
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            session_name = f"ACC_{session_type}_{timestamp}"
             
             # Iniciar grabación de telemetría
             session_dir = self.telemetry_recorder.start_recording(session_name)
@@ -344,13 +330,13 @@ class MainWindow(QMainWindow):
             self.screen_recorder.start_recording(video_filename)
             
             self.control_tab.set_status("Recording Active", COLORS['status_recording'])
-            self.control_tab.update_session_name(session_name)
+            self.control_tab.update_session_name(f"{session_type} - {timestamp}")
             
         except Exception as e:
             self.control_tab.log(f"❌ Error starting recording: {str(e)}")
         
     def stop_recording(self):
-        """Detiene la grabación"""
+        """Detiene la grabación cuando termina la carrera"""
         if not self.telemetry_recorder.is_recording:
             return
             
@@ -368,13 +354,14 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.control_tab.log(f"⚠ Error stopping telemetry recording: {str(e)}")
         
-        self.control_tab.set_status("System Monitoring", COLORS['status_monitoring'])
+        self.control_tab.set_status("Waiting for Race", COLORS['status_monitoring'])
         self.control_tab.update_session_name("—")
         
         self.sessions_tab.refresh_recordings()
         
-    def update_duration(self):
-        """Actualiza el contador de duración"""
+    def update_ui(self):
+        """Actualiza la UI periódicamente"""
+        # Actualizar duración si está grabando
         if self.telemetry_recorder.is_recording:
             stats = self.telemetry_recorder.get_current_stats()
             
@@ -385,6 +372,57 @@ class MainWindow(QMainWindow):
             
             self.control_tab.update_duration(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
             self.control_tab.update_records(stats['records_count'])
+        
+        # Capturar telemetría si está en carrera
+        if self.session_monitor.is_in_race and self.telemetry_recorder.is_recording:
+            self._capture_telemetry()
+    
+    def _capture_telemetry(self):
+        """Captura y guarda datos de telemetría"""
+        try:
+            # Obtener datos del jugador
+            player_data = self.acc_telemetry.get_player_telemetry()
+            if player_data:
+                self.telemetry_recorder.add_telemetry_record(player_data)
+            
+            # Obtener info de sesión
+            session_info = self.acc_telemetry.get_session_info()
+            if session_info:
+                # Añadir info de sesión al último registro
+                combined_data = {**player_data, **session_info}
+                # No necesitamos añadirlo de nuevo, solo actualizar
+        except Exception as e:
+            pass  # Silenciar errores de captura individual
+    
+    # ========== Callbacks del monitor de sesiones ==========
+    
+    def _on_race_started(self, race_data: dict):
+        """Callback cuando comienza una carrera"""
+        session_type = race_data.get('session_type', 'Unknown')
+        self.control_tab.log(f"🏁 Race started: {session_type}")
+        self.start_recording(race_data)
+    
+    def _on_race_ended(self, race_data: dict):
+        """Callback cuando termina una carrera"""
+        duration = race_data.get('duration_seconds', 0)
+        self.control_tab.log(f"🏁 Race ended - Duration: {duration:.0f}s")
+        self.stop_recording()
+    
+    def _on_status_changed(self, old_status: SessionStatus, new_status: SessionStatus):
+        """Callback cuando cambia el estado de la sesión"""
+        status_messages = {
+            SessionStatus.OFF: ("ACC Disconnected", COLORS['status_offline']),
+            SessionStatus.MENU: ("In Menus", COLORS['status_monitoring']),
+            SessionStatus.REPLAY: ("Watching Replay", COLORS['status_monitoring']),
+            SessionStatus.LIVE_PAUSED: ("Session Paused", COLORS['status_monitoring']),
+            SessionStatus.LIVE_WAITING: ("In Pits", COLORS['status_monitoring']),
+            SessionStatus.LIVE_RACING: ("Racing", COLORS['status_recording'])
+        }
+        
+        if new_status in status_messages:
+            msg, color = status_messages[new_status]
+            if not self.telemetry_recorder.is_recording:
+                self.control_tab.set_status(msg, color)
     
     # ========== Callbacks de grabadores ==========
     
