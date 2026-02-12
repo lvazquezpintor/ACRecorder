@@ -12,12 +12,20 @@ COLORS = {
     'text_secondary': '#4A5568',
     'text_muted': '#718096',
     'text_light': '#A0AEC0',
+    'accent': '#4299E1',
     'accent_red': '#E53E3E',
     'accent_green': '#48BB78',
     'accent_blue': '#4299E1',
     'status_offline': '#EF4444',
     'status_monitoring': '#F59E0B',
     'status_recording': '#10B981',
+    
+    # Colores adicionales para la nueva pestaña de telemetría
+    'panel_bg': '#FFFFFF',
+    'panel_hover': '#F7FAFC',
+    'input_bg': '#F7FAFC',
+    'button_bg': '#FFFFFF',
+    'button_hover': '#EDF2F7',
 }
 
 # Estilos de componentes comunes

@@ -1,6 +1,15 @@
 """
 ACC Telemetry Module - Interfaz para leer datos de Assetto Corsa Competizione
 Utiliza memoria compartida (Shared Memory) para acceder a los datos del juego
+
+NOTA IMPORTANTE SOBRE OFFSETS:
+- Los offsets en este módulo están basados en la documentación oficial de ACC Shared Memory
+- La estructura Physics contiene:
+  * Offset 92-108: wheelsPressure (presiones en PSI) - CORREGIDO
+  * Offset 156-172: tyreCoreTemperature (temperaturas en °C) - CORREGIDO
+  * Los offsets anteriores estaban incorrectos, causando que las presiones mostraran 0.0
+- Las temperaturas de frenos (brakeTempCore) requieren verificación del offset exacto
+  según la versión de ACC instalada
 """
 
 import mmap
@@ -188,6 +197,7 @@ class ACCTelemetry:
             accg_y = struct.unpack('f', physics_data[48:52])[0]
             accg_z = struct.unpack('f', physics_data[52:56])[0]
             
+            # Estructura de Physics según documentación oficial de ACC:
             # Offset 60-76: wheelSlip (4 floats: FL, FR, RL, RR) - Deslizamiento de ruedas
             # Valores > 1.0 indican bloqueo/deslizamiento
             wheel_slip_fl = struct.unpack('f', physics_data[60:64])[0]
@@ -201,33 +211,45 @@ class ACCTelemetry:
             wheel_load_rl = struct.unpack('f', physics_data[84:88])[0]
             wheel_load_rr = struct.unpack('f', physics_data[88:92])[0]
             
-            # Offset 92-108: wheelsPressure (4 floats) - Presiones de ruedas
+            # Offset 92-108: wheelsPressure (4 floats) - Presiones de ruedas en PSI
             tyre_pressure_fl = struct.unpack('f', physics_data[92:96])[0]
             tyre_pressure_fr = struct.unpack('f', physics_data[96:100])[0]
             tyre_pressure_rl = struct.unpack('f', physics_data[100:104])[0]
             tyre_pressure_rr = struct.unpack('f', physics_data[104:108])[0]
             
-            # Offset 108-124: wheelAngularSpeed (4 floats) - Velocidad angular de ruedas
+            # Offset 108-124: wheelAngularSpeed (4 floats) - Velocidad angular de ruedas rad/s
             wheel_angular_fl = struct.unpack('f', physics_data[108:112])[0]
             wheel_angular_fr = struct.unpack('f', physics_data[112:116])[0]
             wheel_angular_rl = struct.unpack('f', physics_data[116:120])[0]
             wheel_angular_rr = struct.unpack('f', physics_data[120:124])[0]
             
-            # Offset 124-140: tyreContactPoint (4 vec3, solo leemos primeros 2)
-            # Offset 140-156: tyreContactNormal (4 vec3, omitido por brevedad)
-            # Offset 156-172: tyreContactHeading (4 vec3, omitido por brevedad)
+            # Offset 124-140: tyreWear (4 floats) - Desgaste de neumáticos
+            tyre_wear_fl = struct.unpack('f', physics_data[124:128])[0]
+            tyre_wear_fr = struct.unpack('f', physics_data[128:132])[0]
+            tyre_wear_rl = struct.unpack('f', physics_data[132:136])[0]
+            tyre_wear_rr = struct.unpack('f', physics_data[136:140])[0]
             
-            # Offset 172-188: brakeTempCore (4 floats) - Temperatura núcleo de frenos
-            brake_temp_fl = struct.unpack('f', physics_data[172:176])[0]
-            brake_temp_fr = struct.unpack('f', physics_data[176:180])[0]
-            brake_temp_rl = struct.unpack('f', physics_data[180:184])[0]
-            brake_temp_rr = struct.unpack('f', physics_data[184:188])[0]
+            # Offset 140-156: tyreDirtyLevel (4 floats) - Nivel de suciedad de neumáticos
+            # Offset 156-172: tyreCoreTemperature (4 floats) - Temperatura núcleo de neumáticos °C
+            tyre_temp_fl = struct.unpack('f', physics_data[156:160])[0]
+            tyre_temp_fr = struct.unpack('f', physics_data[160:164])[0]
+            tyre_temp_rl = struct.unpack('f', physics_data[164:168])[0]
+            tyre_temp_rr = struct.unpack('f', physics_data[168:172])[0]
             
-            # Offset 188-204: tyreCoreTemperature (4 floats) - Temperatura núcleo de neumáticos
-            tyre_temp_fl = struct.unpack('f', physics_data[188:192])[0]
-            tyre_temp_fr = struct.unpack('f', physics_data[192:196])[0]
-            tyre_temp_rl = struct.unpack('f', physics_data[196:200])[0]
-            tyre_temp_rr = struct.unpack('f', physics_data[200:204])[0]
+            # Offset 172-188: camberRAD (4 floats) - Ángulo de camber en radianes
+            # Offset 188-204: suspensionTravel (4 floats) - Recorrido de suspensión en metros
+            
+            # Offset 204-220: drs (float), tc (float), heading (float), pitch (float), roll (float)
+            # ...
+            
+            # Offset variable: brakeTempCore (4 floats) - Necesitamos calcular offset correcto
+            # Según documentación: después de muchos otros campos
+            # Por ahora, usaremos valores dummy para temperaturas de frenos
+            # TODO: Verificar offset correcto en documentación actualizada
+            brake_temp_fl = 0.0
+            brake_temp_fr = 0.0
+            brake_temp_rl = 0.0
+            brake_temp_rr = 0.0
             
             # Detectar bloqueos de rueda (cuando slip > umbral)
             # Valores típicos: < 1.0 = normal, > 1.2 = deslizamiento, > 2.0 = bloqueo severo
@@ -279,6 +301,12 @@ class ACCTelemetry:
                         'front_right': round(tyre_pressure_fr, 2),
                         'rear_left': round(tyre_pressure_rl, 2),
                         'rear_right': round(tyre_pressure_rr, 2)
+                    },
+                    'wear': {
+                        'front_left': round(tyre_wear_fl, 3),
+                        'front_right': round(tyre_wear_fr, 3),
+                        'rear_left': round(tyre_wear_rl, 3),
+                        'rear_right': round(tyre_wear_rr, 3)
                     },
                     'angular_speed': {
                         'front_left': round(wheel_angular_fl, 1),

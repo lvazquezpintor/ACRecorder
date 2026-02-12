@@ -15,10 +15,10 @@ import os
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from gui.widgets import SidebarButton
-from gui.tabs import ControlTab, SessionsTab, AnalyticsTab, SettingsTab
+from gui.tabs import ControlTab, SessionsTab, AnalyticsTab, SettingsTab, SharedMemoryTab
+from gui.tabs.telemetry_analysis_tab import TelemetryAnalysisTab
 from gui.styles import COLORS, SIDEBAR_STYLE, SEARCH_INPUT_STYLE
-from core import TelemetryRecorder, ScreenRecorder, ACCSessionMonitor, SessionStatus
-from acc_telemetry import ACCTelemetry
+from core import TelemetryRecorder, ScreenRecorder, ACCSessionMonitor, SessionStatus, ACCTelemetry
 
 
 class MainWindow(QMainWindow):
@@ -122,8 +122,18 @@ class MainWindow(QMainWindow):
         btn_analytics.clicked.connect(lambda: self.switch_page(2))
         self.nav_buttons.append(btn_analytics)
         
+        # Nueva pestaña de análisis detallado
+        btn_telemetry = SidebarButton("📈", "TELEMETRY")
+        btn_telemetry.clicked.connect(lambda: self.switch_page(3))
+        self.nav_buttons.append(btn_telemetry)
+        
+        # Nueva pestaña de shared memory
+        btn_sharedmem = SidebarButton("🔍", "SHARED MEM")
+        btn_sharedmem.clicked.connect(lambda: self.switch_page(4))
+        self.nav_buttons.append(btn_sharedmem)
+        
         btn_settings = SidebarButton("⚙️", "SETTINGS")
-        btn_settings.clicked.connect(lambda: self.switch_page(3))
+        btn_settings.clicked.connect(lambda: self.switch_page(5))
         self.nav_buttons.append(btn_settings)
         
         for btn in self.nav_buttons:
@@ -133,7 +143,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(nav_layout)
         
         # Footer
-        version = QLabel("VERSION 1.0.2")
+        version = QLabel("VERSION 1.0.3")
         version.setStyleSheet(f"color: {COLORS['text_light']}; font-size: 11px; padding: 20px; background: transparent; border: none;")
         version.setAlignment(Qt.AlignCenter)
         layout.addWidget(version)
@@ -159,7 +169,7 @@ class MainWindow(QMainWindow):
         avatar.setAlignment(Qt.AlignCenter)
         avatar.setFixedSize(64, 64)
         
-        title = QLabel("ACC\nRECORDER")
+        title = QLabel("ACC\\nRECORDER")
         title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 16px; font-weight: 700; margin-top: 12px; background: transparent; border: none;")
         title.setAlignment(Qt.AlignCenter)
         
@@ -189,6 +199,8 @@ class MainWindow(QMainWindow):
         self.control_tab = ControlTab()
         self.sessions_tab = SessionsTab(self.output_dir)
         self.analytics_tab = AnalyticsTab(self.output_dir)
+        self.telemetry_tab = TelemetryAnalysisTab(self.output_dir)
+        self.shared_memory_tab = SharedMemoryTab()
         self.settings_tab = SettingsTab(self.output_dir)
         
         # Conectar señales
@@ -200,6 +212,8 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.control_tab)
         self.pages.addWidget(self.sessions_tab)
         self.pages.addWidget(self.analytics_tab)
+        self.pages.addWidget(self.telemetry_tab)
+        self.pages.addWidget(self.shared_memory_tab)
         self.pages.addWidget(self.settings_tab)
         
         layout.addWidget(self.pages)
@@ -208,66 +222,45 @@ class MainWindow(QMainWindow):
         return container
         
     def create_header(self) -> QFrame:
-        """Crea el header con búsqueda"""
+        """Crea el header"""
         header = QFrame()
-        header.setStyleSheet("background-color: transparent;")
         
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(24)
         
-        self.page_title = QLabel("System Status")
-        self.page_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 24px; font-weight: 700; background: transparent; border: none;")
+        # Título
+        self.page_title = QLabel("CONTROL")
+        self.page_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 28px; font-weight: 700; background: transparent; border: none;")
         
         layout.addWidget(self.page_title)
         layout.addStretch()
         
-        # Search bar
-        search_container = QFrame()
-        search_container.setStyleSheet(f"""
-            QFrame {{
-                background-color: white;
-                border: 1px solid {COLORS['border']};
-                border-radius: 8px;
-            }}
-        """)
-        search_container.setFixedWidth(300)
-        
-        search_layout = QHBoxLayout()
-        search_layout.setContentsMargins(12, 8, 12, 8)
-        
-        search_icon = QLabel("🔍")
-        search_icon.setStyleSheet("background: transparent; border: none;")
-        search_input = QLineEdit()
-        search_input.setPlaceholderText("Find here...")
-        search_input.setStyleSheet(SEARCH_INPUT_STYLE)
-        
-        search_layout.addWidget(search_icon)
-        search_layout.addWidget(search_input)
-        search_container.setLayout(search_layout)
-        
-        layout.addWidget(search_container)
-        
         header.setLayout(layout)
         return header
-        
+    
     def switch_page(self, index: int):
         """Cambia de página"""
         self.pages.setCurrentIndex(index)
         
-        titles = ["System Status", "Recorded Sessions", "Telemetry Analytics", "System Settings"]
-        self.page_title.setText(titles[index])
-        
+        # Actualizar navegación
         for i, btn in enumerate(self.nav_buttons):
             btn.setChecked(i == index)
-            
+        
+        # Actualizar título
+        titles = ["CONTROL", "SESSIONS", "ANALYTICS", "TELEMETRY", "SHARED MEMORY", "SETTINGS"]
+        if index < len(titles):
+            self.page_title.setText(titles[index])
+    
     def load_analytics_file(self, filepath: Path):
-        """Carga un archivo en analytics y cambia de pestaña"""
+        """Carga un archivo en analytics y cambia a esa pestaña"""
         self.analytics_tab.load_file(filepath)
         self.switch_page(2)
-        
+    
     def on_config_saved(self, config: dict):
-        """Callback cuando se guarda la configuración"""
+        """Cuando se guarda la configuración"""
         self.output_dir = Path(config['output_dir'])
+        self.output_dir.mkdir(exist_ok=True)
         
         # Actualizar directorios de los grabadores
         self.telemetry_recorder.output_dir = self.output_dir
