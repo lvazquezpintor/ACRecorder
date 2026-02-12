@@ -70,6 +70,26 @@ class SettingsTab(QWidget):
         title.setStyleSheet(PANEL_TITLE_STYLE)
         layout.addWidget(title)
         
+        # Codec / Hardware Acceleration
+        codec_row = QHBoxLayout()
+        codec_label = QLabel("Codec:")
+        codec_label.setStyleSheet(SETTING_LABEL_STYLE)
+        codec_label.setMinimumWidth(120)
+        self.codec_combo = QComboBox()
+        self.codec_combo.addItems([
+            'Auto (Detect GPU)',
+            'NVIDIA NVENC (h264_nvenc)',
+            'Intel QuickSync (h264_qsv)',
+            'Apple VideoToolbox (macOS)',
+            'Software (libx264)'
+        ])
+        self.codec_combo.setCurrentIndex(0)
+        self.codec_combo.setStyleSheet(COMBO_BOX_STYLE)
+        codec_row.addWidget(codec_label)
+        codec_row.addWidget(self.codec_combo)
+        codec_row.addStretch()
+        layout.addLayout(codec_row)
+        
         # FPS
         fps_row = QHBoxLayout()
         fps_label = QLabel("FPS:")
@@ -114,6 +134,24 @@ class SettingsTab(QWidget):
         preset_row.addWidget(self.preset_combo)
         preset_row.addStretch()
         layout.addLayout(preset_row)
+        
+        # Audio Device
+        audio_row = QHBoxLayout()
+        audio_label = QLabel("Audio Device:")
+        audio_label.setStyleSheet(SETTING_LABEL_STYLE)
+        audio_label.setMinimumWidth(120)
+        self.audio_combo = QComboBox()
+        self.audio_combo.addItem('Auto (System Default)')
+        self.audio_combo.setStyleSheet(COMBO_BOX_STYLE)
+        audio_row.addWidget(audio_label)
+        audio_row.addWidget(self.audio_combo)
+        audio_row.addStretch()
+        layout.addLayout(audio_row)
+        
+        # Botón para refrescar dispositivos de audio
+        refresh_btn = ModernButton("🔄  Refresh Audio Devices")
+        refresh_btn.clicked.connect(self.refresh_audio_devices)
+        layout.addWidget(refresh_btn)
         
         panel.setLayout(layout)
         return panel
@@ -185,14 +223,59 @@ class SettingsTab(QWidget):
             self.output_dir_label.setText(str(self.output_dir))
             self.output_dir.mkdir(exist_ok=True)
     
+    def refresh_audio_devices(self):
+        """Refresca la lista de dispositivos de audio"""
+        from core.screen_recorder import ScreenRecorder
+        
+        try:
+            # Crear instancia temporal para obtener dispositivos
+            temp_recorder = ScreenRecorder(self.output_dir)
+            devices = temp_recorder.list_audio_devices()
+            
+            # Actualizar combo box
+            current_selection = self.audio_combo.currentText()
+            self.audio_combo.clear()
+            self.audio_combo.addItem('Auto (System Default)')
+            
+            for device in devices:
+                self.audio_combo.addItem(device)
+            
+            # Restaurar selección si existe
+            index = self.audio_combo.findText(current_selection)
+            if index >= 0:
+                self.audio_combo.setCurrentIndex(index)
+            
+            QMessageBox.information(self, "Success", f"Found {len(devices)} audio devices")
+        except Exception as e:
+            QMessageBox.warning(self, "Warning", f"Could not refresh devices:\n{str(e)}")
+    
     def save_config(self):
         """Guarda la configuración"""
+        # Mapear codec seleccionado
+        codec_map = {
+            'Auto (Detect GPU)': None,
+            'NVIDIA NVENC (h264_nvenc)': 'nvenc',
+            'Intel QuickSync (h264_qsv)': 'qsv',
+            'Apple VideoToolbox (macOS)': 'videotoolbox',
+            'Software (libx264)': None
+        }
+        
+        selected_codec = self.codec_combo.currentText()
+        hw_accel = codec_map.get(selected_codec)
+        
+        # Dispositivo de audio seleccionado
+        audio_device = None
+        if self.audio_combo.currentText() != 'Auto (System Default)':
+            audio_device = self.audio_combo.currentText()
+        
         config = {
             'fps': self.fps_combo.currentText(),
             'crf': self.crf_combo.currentText(),
             'preset': self.preset_combo.currentText(),
             'interval': self.interval_combo.currentText(),
-            'output_dir': str(self.output_dir)
+            'output_dir': str(self.output_dir),
+            'hw_accel': hw_accel,
+            'audio_device': audio_device
         }
         
         config_file = Path(__file__).parent.parent.parent / "config.json"
@@ -207,10 +290,29 @@ class SettingsTab(QWidget):
     
     def get_config(self) -> dict:
         """Obtiene la configuración actual"""
+        # Mapear codec seleccionado
+        codec_map = {
+            'Auto (Detect GPU)': None,
+            'NVIDIA NVENC (h264_nvenc)': 'nvenc',
+            'Intel QuickSync (h264_qsv)': 'qsv',
+            'Apple VideoToolbox (macOS)': 'videotoolbox',
+            'Software (libx264)': None
+        }
+        
+        selected_codec = self.codec_combo.currentText()
+        hw_accel = codec_map.get(selected_codec)
+        
+        # Dispositivo de audio seleccionado
+        audio_device = None
+        if self.audio_combo.currentText() != 'Auto (System Default)':
+            audio_device = self.audio_combo.currentText()
+        
         return {
             'fps': self.fps_combo.currentText(),
             'crf': self.crf_combo.currentText(),
             'preset': self.preset_combo.currentText(),
             'interval': self.interval_combo.currentText(),
-            'output_dir': self.output_dir
+            'output_dir': self.output_dir,
+            'hw_accel': hw_accel,
+            'audio_device': audio_device
         }

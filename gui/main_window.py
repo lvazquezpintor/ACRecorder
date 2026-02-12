@@ -273,11 +273,27 @@ class MainWindow(QMainWindow):
         self.telemetry_recorder.output_dir = self.output_dir
         self.screen_recorder.output_dir = self.output_dir
         
-        # Actualizar configuración de screen recorder si existe
-        if 'screen_recorder' in config:
-            self.screen_recorder.configure(**config['screen_recorder'])
+        # Actualizar configuración de screen recorder
+        recorder_config = {
+            'fps': int(config.get('fps', 30)),
+            'crf': int(config.get('crf', 23)),
+            'preset': config.get('preset', 'ultrafast')
+        }
         
-        self.control_tab.log("✓ Configuration updated")
+        # Añadir aceleración por hardware si está configurada
+        if config.get('hw_accel'):
+            recorder_config['hw_accel'] = config['hw_accel']
+        
+        # Añadir dispositivo de audio si está configurado
+        if config.get('audio_device'):
+            recorder_config['audio_device'] = config['audio_device']
+        
+        self.screen_recorder.configure(**recorder_config)
+        
+        # Log de información de hardware
+        hw_info = self.screen_recorder.get_hardware_info()
+        hw_accel_msg = hw_info['hw_accel'] if hw_info['hw_accel'] else 'Software'
+        self.control_tab.log(f"✓ Configuration updated - Codec: {hw_info['video_codec']} ({hw_accel_msg})")
         
     # ========== Métodos de control ==========
     
@@ -325,9 +341,9 @@ class MainWindow(QMainWindow):
             # Iniciar grabación de telemetría
             session_dir = self.telemetry_recorder.start_recording(session_name)
             
-            # Iniciar grabación de pantalla
+            # Iniciar grabación de pantalla EN EL DIRECTORIO DE SESIÓN
             video_filename = f"{session_name}.mp4"
-            self.screen_recorder.start_recording(video_filename)
+            self.screen_recorder.start_recording(session_dir=session_dir, output_filename=video_filename)
             
             self.control_tab.set_status("Recording Active", COLORS['status_recording'])
             self.control_tab.update_session_name(f"{session_type} - {timestamp}")
