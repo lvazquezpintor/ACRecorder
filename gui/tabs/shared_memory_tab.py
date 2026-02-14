@@ -1,6 +1,7 @@
 """
 Pestaña de Shared Memory - Visualización en tiempo real de TODOS los datos
 Soporta múltiples simuladores de la familia Assetto Corsa
+CORREGIDO según estructuras C++ de ACC con #pragma pack(4)
 """
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
@@ -22,13 +23,13 @@ class SharedMemoryTab(QWidget):
             'physics': 'Local\\acpmf_physics',
             'graphics': 'Local\\acpmf_graphics',
             'static': 'Local\\acpmf_static',
-            'size': 2048
+            'size': 4096  # Aumentado para seguridad
         },
         'AC': {
             'physics': 'Local\\acpmf_physics',
             'graphics': 'Local\\acpmf_graphics',
             'static': 'Local\\acpmf_static',
-            'size': 2048
+            'size': 4096
         }
     }
     
@@ -245,115 +246,192 @@ class SharedMemoryTab(QWidget):
             self.connection_status.setStyleSheet(f"color: {COLORS['status_offline']}; font-size: 13px; font-weight: 600;")
     
     def read_and_parse_physics(self) -> Dict[str, Any]:
-        """Lee y parsea datos de Physics"""
+        """Lee y parsea SPageFilePhysics según estructura C++ con pack(4)"""
         if not self.physics_handle:
             return {}
         
         try:
             self.physics_handle.seek(0)
-            data = self.physics_handle.read(2048)
+            data = self.physics_handle.read(4096)
             
             parsed = {}
+            offset = 0
             
-            # Datos básicos
-            parsed['packetId'] = struct.unpack('i', data[0:4])[0]
-            parsed['gas'] = struct.unpack('f', data[4:8])[0]
-            parsed['brake'] = struct.unpack('f', data[8:12])[0]
-            parsed['fuel'] = struct.unpack('f', data[12:16])[0]
-            parsed['gear'] = struct.unpack('i', data[16:20])[0]
-            parsed['rpm'] = struct.unpack('i', data[20:24])[0]
-            parsed['steerAngle'] = struct.unpack('f', data[24:28])[0]
-            parsed['speedKmh'] = struct.unpack('f', data[28:32])[0]
+            # Estructura C++ exacta con pack(4)
+            parsed['packetId'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['gas'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['brake'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['fuel'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['gear'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['rpms'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['steerAngle'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['speedKmh'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Velocidad (vec3)
-            parsed['velocity_x'] = struct.unpack('f', data[32:36])[0]
-            parsed['velocity_y'] = struct.unpack('f', data[36:40])[0]
-            parsed['velocity_z'] = struct.unpack('f', data[40:44])[0]
+            # velocity[3]
+            parsed['velocity[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['velocity[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['velocity[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Aceleración G (vec3)
-            parsed['accG_x'] = struct.unpack('f', data[44:48])[0]
-            parsed['accG_y'] = struct.unpack('f', data[48:52])[0]
-            parsed['accG_z'] = struct.unpack('f', data[52:56])[0]
+            # accG[3]
+            parsed['accG[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['accG[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['accG[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Wheel slip (4 floats)
-            parsed['wheelSlip_FL'] = struct.unpack('f', data[60:64])[0]
-            parsed['wheelSlip_FR'] = struct.unpack('f', data[64:68])[0]
-            parsed['wheelSlip_RL'] = struct.unpack('f', data[68:72])[0]
-            parsed['wheelSlip_RR'] = struct.unpack('f', data[72:76])[0]
+            # wheelSlip[4]
+            parsed['wheelSlip[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelSlip[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelSlip[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelSlip[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Wheel load (4 floats)
-            parsed['wheelLoad_FL'] = struct.unpack('f', data[76:80])[0]
-            parsed['wheelLoad_FR'] = struct.unpack('f', data[80:84])[0]
-            parsed['wheelLoad_RL'] = struct.unpack('f', data[84:88])[0]
-            parsed['wheelLoad_RR'] = struct.unpack('f', data[88:92])[0]
+            # wheelLoad[4]
+            parsed['wheelLoad[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelLoad[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelLoad[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelLoad[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Wheel pressure (4 floats)
-            parsed['wheelPressure_FL'] = struct.unpack('f', data[92:96])[0]
-            parsed['wheelPressure_FR'] = struct.unpack('f', data[96:100])[0]
-            parsed['wheelPressure_RL'] = struct.unpack('f', data[100:104])[0]
-            parsed['wheelPressure_RR'] = struct.unpack('f', data[104:108])[0]
+            # wheelsPressure[4]
+            parsed['wheelPress[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelPress[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelPress[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelPress[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Wheel angular speed (4 floats)
-            parsed['wheelAngularSpeed_FL'] = struct.unpack('f', data[108:112])[0]
-            parsed['wheelAngularSpeed_FR'] = struct.unpack('f', data[112:116])[0]
-            parsed['wheelAngularSpeed_RL'] = struct.unpack('f', data[116:120])[0]
-            parsed['wheelAngularSpeed_RR'] = struct.unpack('f', data[120:124])[0]
+            # wheelAngularSpeed[4]
+            parsed['wheelAngSpeed[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelAngSpeed[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelAngSpeed[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wheelAngSpeed[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Tyre wear (4 floats)
-            parsed['tyreWear_FL'] = struct.unpack('f', data[124:128])[0]
-            parsed['tyreWear_FR'] = struct.unpack('f', data[128:132])[0]
-            parsed['tyreWear_RL'] = struct.unpack('f', data[132:136])[0]
-            parsed['tyreWear_RR'] = struct.unpack('f', data[136:140])[0]
+            # tyreWear[4]
+            parsed['tyreWear[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreWear[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreWear[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreWear[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Tyre dirty level (4 floats)
-            parsed['tyreDirty_FL'] = struct.unpack('f', data[140:144])[0]
-            parsed['tyreDirty_FR'] = struct.unpack('f', data[144:148])[0]
-            parsed['tyreDirty_RL'] = struct.unpack('f', data[148:152])[0]
-            parsed['tyreDirty_RR'] = struct.unpack('f', data[152:156])[0]
+            # tyreDirtyLevel[4]
+            parsed['tyreDirty[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreDirty[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreDirty[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreDirty[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Tyre core temperature (4 floats)
-            parsed['tyreCoreTemp_FL'] = struct.unpack('f', data[156:160])[0]
-            parsed['tyreCoreTemp_FR'] = struct.unpack('f', data[160:164])[0]
-            parsed['tyreCoreTemp_RL'] = struct.unpack('f', data[164:168])[0]
-            parsed['tyreCoreTemp_RR'] = struct.unpack('f', data[168:172])[0]
+            # tyreCoreTemperature[4]
+            parsed['tyreCoreTemp[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreCoreTemp[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreCoreTemp[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreCoreTemp[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Camber RAD (4 floats)
-            parsed['camberRAD_FL'] = struct.unpack('f', data[172:176])[0]
-            parsed['camberRAD_FR'] = struct.unpack('f', data[176:180])[0]
-            parsed['camberRAD_RL'] = struct.unpack('f', data[180:184])[0]
-            parsed['camberRAD_RR'] = struct.unpack('f', data[184:188])[0]
+            # camberRAD[4]
+            parsed['camberRAD[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['camberRAD[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['camberRAD[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['camberRAD[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Suspension travel (4 floats)
-            parsed['suspensionTravel_FL'] = struct.unpack('f', data[188:192])[0]
-            parsed['suspensionTravel_FR'] = struct.unpack('f', data[192:196])[0]
-            parsed['suspensionTravel_RL'] = struct.unpack('f', data[196:200])[0]
-            parsed['suspensionTravel_RR'] = struct.unpack('f', data[200:204])[0]
+            # suspensionTravel[4]
+            parsed['suspTravel[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['suspTravel[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['suspTravel[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['suspTravel[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # DRS, TC, Heading, Pitch, Roll
-            parsed['drs'] = struct.unpack('f', data[204:208])[0]
-            parsed['tc'] = struct.unpack('f', data[208:212])[0]
-            parsed['heading'] = struct.unpack('f', data[212:216])[0]
-            parsed['pitch'] = struct.unpack('f', data[216:220])[0]
-            parsed['roll'] = struct.unpack('f', data[220:224])[0]
+            parsed['drs'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tc'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['heading'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['pitch'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['roll'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['cgHeight'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # CG Height
-            parsed['cgHeight'] = struct.unpack('f', data[224:228])[0]
+            # carDamage[5]
+            parsed['damage[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['damage[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['damage[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['damage[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['damage[4]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Car damage (5 floats)
-            parsed['carDamage_front'] = struct.unpack('f', data[228:232])[0]
-            parsed['carDamage_rear'] = struct.unpack('f', data[232:236])[0]
-            parsed['carDamage_left'] = struct.unpack('f', data[236:240])[0]
-            parsed['carDamage_right'] = struct.unpack('f', data[240:244])[0]
-            parsed['carDamage_centre'] = struct.unpack('f', data[244:248])[0]
+            parsed['tyresOut'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['pitLimiter'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['abs'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Número de neumáticos fuera
-            parsed['numberOfTyresOut'] = struct.unpack('i', data[248:252])[0]
+            # kersCharge, kersInput (not used in ACC)
+            offset += 8
             
-            # Pit limiter
-            parsed['pitLimiterOn'] = struct.unpack('i', data[252:256])[0]
+            parsed['autoShifter'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
             
-            # ABS
-            parsed['abs'] = struct.unpack('f', data[256:260])[0]
+            # rideHeight[2]
+            parsed['rideHeight[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['rideHeight[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            parsed['turboBoost'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['ballast'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['airDensity'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['airTemp'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['roadTemp'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            # localAngularVel[3]
+            parsed['localAngVel[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['localAngVel[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['localAngVel[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            parsed['finalFF'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['perfMeter'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            # engineBrake, ers fields (not used in ACC) - 6 ints + 1 float = 28 bytes
+            offset += 28
+            
+            # brakeTemp[4]
+            parsed['brakeTemp[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['brakeTemp[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['brakeTemp[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['brakeTemp[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            parsed['clutch'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            # tyreTempI[4], tyreTempM[4], tyreTempO[4] - 12 floats
+            offset += 48
+            
+            parsed['isAI'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            
+            # tyreContactPoint[4][3], tyreContactNormal[4][3], tyreContactHeading[4][3] - 36 floats
+            offset += 144
+            
+            parsed['brakeBias'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            # localVelocity[3]
+            parsed['localVel[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['localVel[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['localVel[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            # P2P - 2 ints
+            offset += 8
+            
+            parsed['currentMaxRpm'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            
+            # mz[4], fx[4], fy[4] - 12 floats
+            offset += 48
+            
+            # slipRatio[4]
+            parsed['slipRatio[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['slipRatio[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['slipRatio[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['slipRatio[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            # slipAngle[4]
+            parsed['slipAngle[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['slipAngle[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['slipAngle[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['slipAngle[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            parsed['tcinAction'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['absInAction'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            
+            # suspensionDamage[4]
+            parsed['suspDamage[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['suspDamage[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['suspDamage[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['suspDamage[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            # tyreTemp[4]
+            parsed['tyreTemp[0]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreTemp[1]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreTemp[2]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreTemp[3]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
             return parsed
             
@@ -361,53 +439,81 @@ class SharedMemoryTab(QWidget):
             return {'error': str(e)}
     
     def read_and_parse_graphics(self) -> Dict[str, Any]:
-        """Lee y parsea datos de Graphics"""
+        """Lee y parsea SPageFileGraphic según estructura C++ con pack(4)"""
         if not self.graphics_handle:
             return {}
         
         try:
             self.graphics_handle.seek(0)
-            data = self.graphics_handle.read(2048)
+            data = self.graphics_handle.read(4096)
             
             parsed = {}
+            offset = 0
             
-            parsed['packetId'] = struct.unpack('i', data[0:4])[0]
-            parsed['status'] = struct.unpack('i', data[4:8])[0]
-            parsed['session'] = struct.unpack('i', data[8:12])[0]
+            parsed['packetId'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['status'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['session'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
             
-            # Tiempos
-            parsed['currentTime'] = struct.unpack('i', data[12:16])[0]
-            parsed['lastTime'] = struct.unpack('i', data[16:20])[0]
-            parsed['bestTime'] = struct.unpack('i', data[20:24])[0]
-            parsed['split'] = struct.unpack('i', data[24:28])[0]
-            parsed['completedLaps'] = struct.unpack('i', data[28:32])[0]
-            parsed['position'] = struct.unpack('i', data[32:36])[0]
-            parsed['iCurrentTime'] = struct.unpack('i', data[36:40])[0]
-            parsed['iLastTime'] = struct.unpack('i', data[40:44])[0]
-            parsed['iBestTime'] = struct.unpack('i', data[44:48])[0]
+            # wchar_t[15] = 30 bytes
+            parsed['currentTime'] = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
+            parsed['lastTime'] = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
+            parsed['bestTime'] = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
+            parsed['split'] = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
             
-            parsed['sessionTimeLeft'] = struct.unpack('f', data[48:52])[0]
-            parsed['distanceTraveled'] = struct.unpack('f', data[52:56])[0]
-            parsed['isInPit'] = struct.unpack('i', data[56:60])[0]
-            parsed['currentSectorIndex'] = struct.unpack('i', data[60:64])[0]
-            parsed['lastSectorTime'] = struct.unpack('i', data[64:68])[0]
-            parsed['numberOfLaps'] = struct.unpack('i', data[68:72])[0]
+            parsed['completedLaps'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['position'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['iCurrentTime'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['iLastTime'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['iBestTime'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['sessionTimeLeft'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['distanceTraveled'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['isInPit'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['currentSector'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['lastSectorTime'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['numberOfLaps'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
             
-            # Compound de neumático
-            parsed['tyreCompound'] = data[72:105].decode('utf-16-le', errors='ignore').rstrip('\x00')
+            # wchar_t[33] = 66 bytes
+            parsed['tyreCompound'] = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
             
-            parsed['replayTimeMultiplier'] = struct.unpack('f', data[108:112])[0]
-            parsed['normalizedCarPosition'] = struct.unpack('f', data[112:116])[0]
+            parsed['replayMult'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['normalizedPos'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['activeCars'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
             
-            # Active cars
-            parsed['activeCars'] = struct.unpack('i', data[116:120])[0]
+            # carCoordinates[60][3] - 180 floats - solo mostramos primeros
+            for i in range(3):
+                parsed[f'carCoord[0][{i}]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            offset += 708  # Saltamos el resto (57 * 3 floats)
             
-            # Coordenadas del coche (vec3 de floats)
-            parsed['carCoordinates_x'] = struct.unpack('f', data[120:124])[0]
-            parsed['carCoordinates_y'] = struct.unpack('f', data[124:128])[0]
-            parsed['carCoordinates_z'] = struct.unpack('f', data[128:132])[0]
+            # carID[60] - 60 ints - solo mostramos primero
+            parsed['carID[0]'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            offset += 236  # Saltamos el resto (59 ints)
             
-            parsed['carID'] = struct.unpack('i', data[132:136])[0]
+            parsed['playerCarID'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['penaltyTime'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['flag'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['penalty'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['idealLineOn'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['isInPitLane'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['surfaceGrip'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['mandPitDone'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['windSpeed'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['windDirection'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['setupMenuVis'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['mainDisplay'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['secDisplay'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['TC'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['TCCut'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['EngineMap'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['ABS'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['fuelXLap'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['rainLights'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['flashLights'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['lightsStage'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['exhaustTemp'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['wiperLV'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['stintTotal'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['stintTime'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['rainTyres'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
             
             return parsed
             
@@ -415,62 +521,77 @@ class SharedMemoryTab(QWidget):
             return {'error': str(e)}
     
     def read_and_parse_static(self) -> Dict[str, Any]:
-        """Lee y parsea datos de Static"""
+        """Lee y parsea SPageFileStatic según estructura C++ con pack(4)"""
         if not self.static_handle:
             return {}
         
         try:
             self.static_handle.seek(0)
-            data = self.static_handle.read(2048)
+            data = self.static_handle.read(4096)
             
             parsed = {}
+            offset = 0
             
-            parsed['smVersion'] = data[0:15].decode('utf-16-le', errors='ignore').rstrip('\x00')
-            parsed['acVersion'] = data[15:30].decode('utf-16-le', errors='ignore').rstrip('\x00')
+            # wchar_t[15] = 30 bytes
+            parsed['smVersion'] = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
+            parsed['acVersion'] = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
             
-            parsed['numberOfSessions'] = struct.unpack('i', data[30:34])[0]
-            parsed['numCars'] = struct.unpack('i', data[34:38])[0]
+            parsed['numSessions'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['numCars'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
             
-            parsed['carModel'] = data[38:138].decode('utf-16-le', errors='ignore').rstrip('\x00')
-            parsed['track'] = data[138:238].decode('utf-16-le', errors='ignore').rstrip('\x00')
-            parsed['playerName'] = data[238:338].decode('utf-16-le', errors='ignore').rstrip('\x00')
-            parsed['playerSurname'] = data[338:438].decode('utf-16-le', errors='ignore').rstrip('\x00')
-            parsed['playerNick'] = data[438:538].decode('utf-16-le', errors='ignore').rstrip('\x00')
+            # wchar_t[33] = 66 bytes
+            parsed['carModel'] = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            parsed['track'] = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            parsed['playerName'] = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            parsed['playerSurname'] = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            parsed['playerNick'] = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
             
-            parsed['sectorCount'] = struct.unpack('i', data[538:542])[0]
+            parsed['sectorCount'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['maxTorque'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['maxPower'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['maxRpm'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['maxFuel'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            parsed['maxTorque'] = struct.unpack('f', data[546:550])[0]
-            parsed['maxPower'] = struct.unpack('f', data[550:554])[0]
-            parsed['maxRpm'] = struct.unpack('i', data[554:558])[0]
-            parsed['maxFuel'] = struct.unpack('f', data[558:562])[0]
+            # suspensionMaxTravel[4]
+            for i in range(4):
+                parsed[f'suspMaxTravel[{i}]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            parsed['suspensionMaxTravel_FL'] = struct.unpack('f', data[562:566])[0]
-            parsed['suspensionMaxTravel_FR'] = struct.unpack('f', data[566:570])[0]
-            parsed['suspensionMaxTravel_RL'] = struct.unpack('f', data[570:574])[0]
-            parsed['suspensionMaxTravel_RR'] = struct.unpack('f', data[574:578])[0]
+            # tyreRadius[4]
+            for i in range(4):
+                parsed[f'tyreRadius[{i}]'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            parsed['tyreRadius_FL'] = struct.unpack('f', data[578:582])[0]
-            parsed['tyreRadius_FR'] = struct.unpack('f', data[582:586])[0]
-            parsed['tyreRadius_RL'] = struct.unpack('f', data[586:590])[0]
-            parsed['tyreRadius_RR'] = struct.unpack('f', data[590:594])[0]
+            parsed['maxTurbo'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            parsed['maxTurboBoost'] = struct.unpack('f', data[594:598])[0]
+            # deprecated_1, deprecated_2
+            offset += 8
             
-            parsed['penaltiesEnabled'] = struct.unpack('i', data[602:606])[0]
-            parsed['aidFuelRate'] = struct.unpack('f', data[606:610])[0]
-            parsed['aidTireRate'] = struct.unpack('f', data[610:614])[0]
-            parsed['aidMechanicalDamage'] = struct.unpack('f', data[614:618])[0]
-            parsed['aidAllowTyreBlankets'] = struct.unpack('i', data[618:622])[0]
-            parsed['aidStability'] = struct.unpack('f', data[622:626])[0]
-            parsed['aidAutoClutch'] = struct.unpack('i', data[626:630])[0]
-            parsed['aidAutoBlip'] = struct.unpack('i', data[630:634])[0]
+            parsed['penaltiesOn'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['aidFuelRate'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['aidTyreRate'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['aidMechDmg'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['tyreBlankets'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['aidStability'] = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            parsed['aidAutoClutch'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['aidAutoBlip'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
             
-            parsed['pitWindowStart'] = struct.unpack('i', data[638:642])[0]
-            parsed['pitWindowEnd'] = struct.unpack('i', data[642:646])[0]
-            parsed['isOnline'] = struct.unpack('i', data[646:650])[0]
+            # DRS/ERS/KERS fields
+            offset += 32  # hasDRS, hasERS, hasKERS, kersMaxJ, engineBrakeSettingsCount, ersPowerControllerCount, trackSPlineLength, ersMaxJ
             
-            parsed['dryTyresName'] = data[650:750].decode('utf-16-le', errors='ignore').rstrip('\x00')
-            parsed['wetTyresName'] = data[750:850].decode('utf-16-le', errors='ignore').rstrip('\x00')
+            # wchar_t[33] = 66 bytes
+            parsed['trackConfig'] = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            
+            offset += 4  # ersMaxJ ya contado arriba, saltar otros campos
+            
+            parsed['isTimedRace'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['hasExtraLap'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            
+            # wchar_t[33] = 66 bytes
+            parsed['carSkin'] = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            
+            parsed['reversedGrid'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['pitWinStart'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['pitWinEnd'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            parsed['isOnline'] = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
             
             return parsed
             
