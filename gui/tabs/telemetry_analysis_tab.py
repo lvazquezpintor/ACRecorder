@@ -1,34 +1,190 @@
 """
-Pestaña de Análisis Avanzado de Telemetría - Comparación de Vueltas
+Pestaña de Análisis Avanzado de Telemetría - Comparación de Vueltas y Análisis de Sectores
 """
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QFrame, QPushButton, QSlider, QListWidget,
                                QCheckBox, QComboBox, QGroupBox,
                                QFileDialog, QMessageBox, QScrollArea,
-                               QListWidgetItem, QSplitter)
+                               QListWidgetItem, QSplitter, QTableWidget,
+                               QTableWidgetItem, QHeaderView, QSpinBox)
 from PySide6.QtCore import Qt
-from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
+from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis, QBarSeries, QBarSet, QBarCategoryAxis
 from PySide6.QtGui import QPainter, QColor, QPen
 from pathlib import Path
 import json
-from typing import List
+from typing import List, Dict, Tuple
+from datetime import datetime
+import statistics
 
 from gui.widgets import ModernButton
+from gui.widgets.track_map_widget import TrackMapWidget, generate_track_from_telemetry
 from gui.styles import COLORS, PANEL_STYLE
 
 
+class LapAnalyzer:
+    """Analiza vueltas y calcula deltas por sectores"""
+    
+    def __init__(self, telemetry_data: List[Dict]):
+        self.telemetry_data = telemetry_data
+        self.laps = self._extract_laps()
+        
+    def _extract_laps(self) -> Dict[int, List[Dict]]:
+        """Extrae cada vuelta como una lista de registros"""
+        laps = {}
+        current_lap = None
+        lap_records = []
+        
+        for record in self.telemetry_data:
+            session = record.get('session_info', {})
+            lap_num = session.get('completed_laps', 0)
+            
+            if current_lap is None:
+                current_lap = lap_num
+            elif lap_num != current_lap:
+                if lap_records and current_lap > 0:
+                    laps[current_lap] = lap_records.copy()
+                lap_records = []
+                current_lap = lap_num
+            
+            lap_records.append(record)
+        
+        if lap_records and current_lap and current_lap > 0:
+            laps[current_lap] = lap_records
+        
+        return laps
+    
+    def get_lap_time(self, lap_number: int) -> float:
+        """Calcula el tiempo de una vuelta"""
+        if lap_number not in self.laps:
+            return 0.0
+        
+        lap_records = self.laps[lap_number]
+        if len(lap_records) < 2:
+            return 0.0
+        
+        start_time = datetime.fromisoformat(lap_records[0]['timestamp'])
+        end_time = datetime.fromisoformat(lap_records[-1]['timestamp'])
+        
+        return (end_time - start_time).total_seconds()
+    
+    def find_best_lap(self) -> Tuple[int, float]:
+        """Encuentra la mejor vuelta"""
+        best_lap = None
+        best_time = float('inf')
+        
+        for lap_num in self.laps.keys():
+            lap_time = self.get_lap_time(lap_num)
+            if 0 < lap_time < best_time:
+                best_time = lap_time
+                best_lap = lap_num
+        
+        return best_lap, best_time
+    
+    def divide_lap_into_segments(self, lap_number: int, num_segments: int = 10) -> List[List[Dict]]:
+        """Divide una vuelta en N segmentos basados en normalized_position"""
+        if lap_number not in self.laps:
+            return []
+        
+        lap_records = self.laps[lap_number]
+        segments = [[] for _ in range(num_segments)]
+        
+        for record in lap_records:
+            session = record.get('session_info', {})
+            normalized_pos = session.get('normalized_position', 0.0)
+            
+            segment_idx = min(int(normalized_pos * num_segments), num_segments - 1)
+            segments[segment_idx].append(record)
+        
+        return segments
+    
+    def get_segment_time(self, segment_records: List[Dict]) -> float:
+        """Calcula el tiempo de un segmento"""
+        if len(segment_records) < 2:
+            return 0.0
+        
+        start_time = datetime.fromisoformat(segment_records[0]['timestamp'])
+        end_time = datetime.fromisoformat(segment_records[-1]['timestamp'])
+        
+        return (end_time - start_time).total_seconds()
+    
+    def get_segment_stats(self, segment_records: List[Dict]) -> Dict:
+        """Calcula estadísticas de un segmento"""
+        if not segment_records:
+            return {}
+        
+        speeds = []
+        brake_usage = []
+        throttle_usage = []
+        min_speed = float('inf')
+        max_speed = 0.0
+        
+        for record in segment_records:
+            player = record.get('player_telemetry', {})
+            if player:
+                speed = player.get('speed_kmh', 0)
+                speeds.append(speed)
+                min_speed = min(min_speed, speed)
+                max_speed = max(max_speed, speed)
+                
+                brake_usage.append(player.get('brake', 0))
+                throttle_usage.append(player.get('gas', 0))
+        
+        return {
+            'avg_speed': statistics.mean(speeds) if speeds else 0,
+            'min_speed': min_speed if min_speed != float('inf') else 0,
+            'max_speed': max_speed,
+            'avg_brake': statistics.mean(brake_usage) if brake_usage else 0,
+            'avg_throttle': statistics.mean(throttle_usage) if throttle_usage else 0,
+            'time': self.get_segment_time(segment_records)
+        }
+    
+    def compare_laps(self, lap1: int, lap2: int, num_segments: int = 10) -> List[Dict]:
+        """Compara dos vueltas segmento por segmento"""
+        segments1 = self.divide_lap_into_segments(lap1, num_segments)
+        segments2 = self.divide_lap_into_segments(lap2, num_segments)
+        
+        comparison = []
+        cumulative_delta = 0.0
+        
+        for i in range(num_segments):
+            if i >= len(segments1) or i >= len(segments2):
+                continue
+            
+            stats1 = self.get_segment_stats(segments1[i])
+            stats2 = self.get_segment_stats(segments2[i])
+            
+            segment_delta = stats2['time'] - stats1['time']
+            cumulative_delta += segment_delta
+            
+            comparison.append({
+                'segment': i + 1,
+                'percentage': f"{i*10}-{(i+1)*10}%",
+                'lap1_time': stats1['time'],
+                'lap2_time': stats2['time'],
+                'delta': segment_delta,
+                'cumulative_delta': cumulative_delta,
+                'lap1_avg_speed': stats1['avg_speed'],
+                'lap2_avg_speed': stats2['avg_speed'],
+                'speed_diff': stats2['avg_speed'] - stats1['avg_speed'],
+                'lap1_min_speed': stats1['min_speed'],
+                'lap2_min_speed': stats2['min_speed']
+            })
+        
+        return comparison
+
+
 class TelemetryAnalysisTab(QWidget):
-    """Pestaña de análisis avanzado con comparación de vueltas"""
+    """Pestaña de análisis avanzado con comparación de vueltas y análisis de sectores"""
     
     def __init__(self, output_dir: Path):
         super().__init__()
         self.output_dir = output_dir
         self.telemetry_data = []
-        self.laps_data = {}
-        self.current_time_index = 0
-        self.selected_laps = []
-        self.charts = {}
+        self.analyzer = None
+        self.best_lap_num = None
+        self.num_segments = 10
+        self.selected_lap_num = None
         
         self.setup_ui()
         
@@ -73,6 +229,10 @@ class TelemetryAnalysisTab(QWidget):
         
         layout.addStretch()
         
+        self.best_lap_label = QLabel("")
+        self.best_lap_label.setStyleSheet(f"color: {COLORS['accent_green']}; font-size: 13px; font-weight: 600;")
+        layout.addWidget(self.best_lap_label)
+        
         widget.setLayout(layout)
         return widget
     
@@ -86,11 +246,11 @@ class TelemetryAnalysisTab(QWidget):
         laps_group = self.create_laps_list()
         layout.addWidget(laps_group)
         
+        sector_group = self.create_sector_controls()
+        layout.addWidget(sector_group)
+        
         compare_group = self.create_compare_controls()
         layout.addWidget(compare_group)
-        
-        timeline_group = self.create_timeline_controls()
-        layout.addWidget(timeline_group)
         
         widget.setLayout(layout)
         return widget
@@ -140,45 +300,17 @@ class TelemetryAnalysisTab(QWidget):
                 background: {COLORS['panel_hover']};
             }}
         """)
-        self.laps_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.laps_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.laps_list.itemSelectionChanged.connect(self.on_lap_selection_changed)
         
         layout.addWidget(self.laps_list)
         
-        btn_layout = QHBoxLayout()
-        
-        self.btn_select_all = QPushButton("Todas")
-        self.btn_select_all.clicked.connect(self.select_all_laps)
-        
-        self.btn_clear = QPushButton("Ninguna")
-        self.btn_clear.clicked.connect(self.clear_lap_selection)
-        
-        for btn in [self.btn_select_all, self.btn_clear]:
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {COLORS['button_bg']};
-                    color: {COLORS['text_primary']};
-                    border: 1px solid {COLORS['border']};
-                    border-radius: 4px;
-                    padding: 6px 12px;
-                    font-size: 12px;
-                }}
-                QPushButton:hover {{
-                    background: {COLORS['button_hover']};
-                }}
-            """)
-        
-        btn_layout.addWidget(self.btn_select_all)
-        btn_layout.addWidget(self.btn_clear)
-        
-        layout.addLayout(btn_layout)
-        
         group.setLayout(layout)
         return group
     
-    def create_compare_controls(self) -> QGroupBox:
-        """Controles de comparación"""
-        group = QGroupBox("Opciones de Comparación")
+    def create_sector_controls(self) -> QGroupBox:
+        """Controles de análisis por sectores"""
+        group = QGroupBox("Análisis por Sectores")
         group.setStyleSheet(f"""
             QGroupBox {{
                 background: {COLORS['panel_bg']};
@@ -190,10 +322,58 @@ class TelemetryAnalysisTab(QWidget):
                 font-weight: 600;
                 color: {COLORS['text_primary']};
             }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 8px;
+        """)
+        
+        layout = QVBoxLayout()
+        
+        # Número de segmentos
+        segments_layout = QHBoxLayout()
+        segments_label = QLabel("Dividir vuelta en:")
+        segments_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px;")
+        
+        self.segments_spinbox = QSpinBox()
+        self.segments_spinbox.setMinimum(5)
+        self.segments_spinbox.setMaximum(20)
+        self.segments_spinbox.setValue(10)
+        self.segments_spinbox.setSuffix(" sectores")
+        self.segments_spinbox.setStyleSheet(f"""
+            QSpinBox {{
+                background: {COLORS['input_bg']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 6px;
+            }}
+        """)
+        self.segments_spinbox.valueChanged.connect(self.on_segments_changed)
+        
+        segments_layout.addWidget(segments_label)
+        segments_layout.addWidget(self.segments_spinbox)
+        
+        layout.addLayout(segments_layout)
+        
+        # Botón de análisis
+        self.btn_analyze = ModernButton("🔍 Analizar vs Mejor Vuelta")
+        self.btn_analyze.clicked.connect(self.analyze_selected_lap)
+        self.btn_analyze.setEnabled(False)
+        layout.addWidget(self.btn_analyze)
+        
+        group.setLayout(layout)
+        return group
+    
+    def create_compare_controls(self) -> QGroupBox:
+        """Controles de comparación"""
+        group = QGroupBox("Opciones de Visualización")
+        group.setStyleSheet(f"""
+            QGroupBox {{
+                background: {COLORS['panel_bg']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+                padding: 16px;
+                margin-top: 8px;
+                font-size: 14px;
+                font-weight: 600;
+                color: {COLORS['text_primary']};
             }}
         """)
         
@@ -218,14 +398,6 @@ class TelemetryAnalysisTab(QWidget):
                 padding: 6px;
                 font-size: 12px;
             }}
-            QComboBox::drop-down {{
-                border: none;
-            }}
-            QComboBox QAbstractItemView {{
-                background: {COLORS['input_bg']};
-                color: {COLORS['text_primary']};
-                selection-background-color: {COLORS['accent']};
-            }}
         """)
         self.sort_combo.currentIndexChanged.connect(self.sort_laps)
         
@@ -234,123 +406,11 @@ class TelemetryAnalysisTab(QWidget):
         
         layout.addLayout(sort_layout)
         
-        self.align_time_check = QCheckBox("Alinear vueltas por tiempo relativo")
-        self.align_time_check.setChecked(True)
-        self.align_time_check.setStyleSheet(f"""
-            QCheckBox {{
-                color: {COLORS['text_primary']};
-                font-size: 12px;
-            }}
-            QCheckBox::indicator {{
-                width: 16px;
-                height: 16px;
-                border-radius: 3px;
-                border: 1px solid {COLORS['border']};
-                background: {COLORS['input_bg']};
-            }}
-            QCheckBox::indicator:checked {{
-                background: {COLORS['accent']};
-                border-color: {COLORS['accent']};
-            }}
-        """)
-        self.align_time_check.stateChanged.connect(self.update_charts)
-        
-        layout.addWidget(self.align_time_check)
-        
-        self.btn_update = ModernButton("🔄 Actualizar Gráficos")
-        self.btn_update.clicked.connect(self.update_charts)
-        layout.addWidget(self.btn_update)
-        
-        group.setLayout(layout)
-        return group
-    
-    def create_timeline_controls(self) -> QGroupBox:
-        """Controles de timeline/slider"""
-        group = QGroupBox("Timeline")
-        group.setStyleSheet(f"""
-            QGroupBox {{
-                background: {COLORS['panel_bg']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 8px;
-                padding: 16px;
-                margin-top: 8px;
-                font-size: 14px;
-                font-weight: 600;
-                color: {COLORS['text_primary']};
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 8px;
-            }}
-        """)
-        
-        layout = QVBoxLayout()
-        
-        self.time_display = QLabel("00:00.000")
-        self.time_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.time_display.setStyleSheet(f"""
-            color: {COLORS['accent']};
-            font-size: 24px;
-            font-weight: bold;
-            background: transparent;
-        """)
-        layout.addWidget(self.time_display)
-        
-        self.timeline_slider = QSlider(Qt.Orientation.Horizontal)
-        self.timeline_slider.setMinimum(0)
-        self.timeline_slider.setMaximum(100)
-        self.timeline_slider.setValue(0)
-        self.timeline_slider.setStyleSheet(f"""
-            QSlider::groove:horizontal {{
-                border: 1px solid {COLORS['border']};
-                height: 8px;
-                background: {COLORS['input_bg']};
-                border-radius: 4px;
-            }}
-            QSlider::handle:horizontal {{
-                background: {COLORS['accent']};
-                border: 2px solid {COLORS['accent']};
-                width: 16px;
-                margin: -5px 0;
-                border-radius: 8px;
-            }}
-            QSlider::sub-page:horizontal {{
-                background: {COLORS['accent']};
-                border-radius: 4px;
-            }}
-        """)
-        self.timeline_slider.valueChanged.connect(self.on_timeline_changed)
-        layout.addWidget(self.timeline_slider)
-        
-        range_layout = QHBoxLayout()
-        self.start_time_label = QLabel("00:00")
-        self.end_time_label = QLabel("00:00")
-        
-        for lbl in [self.start_time_label, self.end_time_label]:
-            lbl.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px;")
-        
-        range_layout.addWidget(self.start_time_label)
-        range_layout.addStretch()
-        range_layout.addWidget(self.end_time_label)
-        layout.addLayout(range_layout)
-        
-        self.current_info_label = QLabel("")
-        self.current_info_label.setWordWrap(True)
-        self.current_info_label.setStyleSheet(f"""
-            color: {COLORS['text_primary']};
-            font-size: 12px;
-            padding: 8px;
-            background: {COLORS['input_bg']};
-            border-radius: 4px;
-        """)
-        layout.addWidget(self.current_info_label)
-        
         group.setLayout(layout)
         return group
     
     def create_right_panel(self) -> QWidget:
-        """Panel derecho: Gráficos"""
+        """Panel derecho: Mapa, Tabla de deltas y gráficos"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; }")
@@ -360,47 +420,98 @@ class TelemetryAnalysisTab(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(16)
         
-        self.create_chart_views(layout)
+        # Mapa del circuito 2D
+        self.track_map = TrackMapWidget()
+        self.track_map.setMinimumHeight(500)
+        self.track_map.sector_clicked.connect(self.on_sector_clicked)
+        layout.addWidget(self.track_map)
+        
+        # Tabla de deltas por sector
+        self.delta_table = self.create_delta_table()
+        layout.addWidget(self.delta_table)
+        
+        # Gráfico de deltas
+        self.delta_chart_view = self.create_delta_chart()
+        layout.addWidget(self.delta_chart_view)
+        
+        # Gráfico de velocidades comparadas
+        self.speed_comparison_chart = self.create_speed_comparison_chart()
+        layout.addWidget(self.speed_comparison_chart)
         
         widget.setLayout(layout)
         scroll.setWidget(widget)
         
         return scroll
     
-    def create_chart_views(self, layout: QVBoxLayout):
-        """Crea las vistas de gráficos"""
-        chart_configs = [
-            ("speed_chart", "Velocidad (km/h)"),
-            ("rpm_chart", "RPM"),
-            ("throttle_brake_chart", "Acelerador / Freno"),
-            ("gforce_chart", "Fuerzas G (Lateral / Longitudinal)"),
-            ("wheel_slip_chart", "Deslizamiento de Ruedas"),
-            ("tyre_temp_chart", "Temperatura de Neumáticos (°C)"),
-            ("brake_temp_chart", "Temperatura de Frenos (°C)"),
-        ]
+    def create_delta_table(self) -> QTableWidget:
+        """Crea la tabla de deltas por sector"""
+        table = QTableWidget()
+        table.setColumnCount(6)
+        table.setHorizontalHeaderLabels([
+            "Sector", "Zona", "Delta", "Acumulado", "Vel. Media", "Vel. Mín"
+        ])
         
-        for chart_id, title in chart_configs:
-            chart_view = self.create_chart(title)
-            self.charts[chart_id] = chart_view
-            layout.addWidget(chart_view)
+        table.setStyleSheet(f"""
+            QTableWidget {{
+                background: {COLORS['panel_bg']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+                gridline-color: {COLORS['border']};
+                color: {COLORS['text_primary']};
+            }}
+            QTableWidget::item {{
+                padding: 8px;
+                border: none;
+            }}
+            QTableWidget::item:selected {{
+                background: {COLORS['accent']};
+            }}
+            QHeaderView::section {{
+                background: {COLORS['input_bg']};
+                color: {COLORS['text_primary']};
+                padding: 8px;
+                border: none;
+                font-weight: 600;
+            }}
+        """)
+        
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        table.setMinimumHeight(400)
+        table.setMaximumHeight(500)
+        
+        return table
     
-    def create_chart(self, title: str) -> QChartView:
-        """Crea un gráfico vacío"""
+    def create_delta_chart(self) -> QChartView:
+        """Crea el gráfico de barras de deltas"""
         chart = QChart()
-        chart.setTitle(title)
+        chart.setTitle("Deltas por Sector (vs Mejor Vuelta)")
         chart.setTheme(QChart.ChartTheme.ChartThemeDark)
-        chart.setAnimationOptions(QChart.AnimationOption.NoAnimation)
+        chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+        
+        chart_view = QChartView(chart)
+        chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        chart_view.setMinimumHeight(400)
+        
+        return chart_view
+    
+    def create_speed_comparison_chart(self) -> QChartView:
+        """Crea gráfico de comparación de velocidades"""
+        chart = QChart()
+        chart.setTitle("Comparación de Velocidad por Posición en el Circuito")
+        chart.setTheme(QChart.ChartTheme.ChartThemeDark)
         
         axis_x = QValueAxis()
-        axis_x.setTitleText("Tiempo (s)")
+        axis_x.setTitleText("Posición en Circuito (%)")
         axis_y = QValueAxis()
+        axis_y.setTitleText("Velocidad (km/h)")
         
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
         
         chart_view = QChartView(chart)
         chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        chart_view.setMinimumHeight(300)
+        chart_view.setMinimumHeight(400)
         
         return chart_view
     
@@ -423,300 +534,294 @@ class TelemetryAnalysisTab(QWidget):
             self.file_label.setText(f"✓ {Path(filename).name} - {len(self.telemetry_data)} registros")
             self.file_label.setStyleSheet(f"color: {COLORS['accent_green']}; font-size: 13px; font-weight: 500;")
             
-            self.process_laps()
+            # Crear analizador
+            self.analyzer = LapAnalyzer(self.telemetry_data)
+            
+            # Encontrar mejor vuelta
+            self.best_lap_num, best_time = self.analyzer.find_best_lap()
+            if self.best_lap_num:
+                self.best_lap_label.setText(f"🏆 Mejor: Vuelta #{self.best_lap_num} - {best_time:.3f}s")
+                
+                # Generar mapa del circuito usando la mejor vuelta
+                track_points = generate_track_from_telemetry(self.analyzer.laps[self.best_lap_num])
+                
+                # Obtener nombre del circuito
+                track_name = "Circuito Desconocido"
+                if self.telemetry_data:
+                    track_data = self.telemetry_data[0].get('track_data', {})
+                    if track_data:
+                        track_name = track_data.get('track_name', 'Circuito Desconocido')
+                
+                self.track_map.set_track_data(track_points, track_name)
+            
             self.populate_laps_list()
-            self.update_timeline_range()
             
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo cargar el archivo:\\n{str(e)}")
-    
-    def process_laps(self):
-        """Procesa la telemetría y detecta vueltas"""
-        self.laps_data = {}
-        
-        if not self.telemetry_data:
-            return
-        
-        current_lap = None
-        lap_start_idx = 0
-        
-        for i, record in enumerate(self.telemetry_data):
-            lap_num = record.get('lap_number', 0)
-            
-            if current_lap is None:
-                current_lap = lap_num
-                lap_start_idx = i
-            
-            if lap_num != current_lap:
-                lap_data = self.telemetry_data[lap_start_idx:i]
-                lap_time = self.calculate_lap_time(lap_data)
-                
-                self.laps_data[current_lap] = {
-                    'start_idx': lap_start_idx,
-                    'end_idx': i - 1,
-                    'lap_time': lap_time,
-                    'data': lap_data
-                }
-                
-                current_lap = lap_num
-                lap_start_idx = i
-        
-        if current_lap is not None:
-            lap_data = self.telemetry_data[lap_start_idx:]
-            lap_time = self.calculate_lap_time(lap_data)
-            
-            self.laps_data[current_lap] = {
-                'start_idx': lap_start_idx,
-                'end_idx': len(self.telemetry_data) - 1,
-                'lap_time': lap_time,
-                'data': lap_data
-            }
-    
-    def calculate_lap_time(self, lap_data: List[dict]) -> float:
-        """Calcula el tiempo de una vuelta"""
-        if not lap_data or len(lap_data) < 2:
-            return 0.0
-        
-        start_time = lap_data[0].get('second', 0)
-        end_time = lap_data[-1].get('second', 0)
-        
-        return end_time - start_time
+            QMessageBox.critical(self, "Error", f"No se pudo cargar el archivo:\n{str(e)}")
     
     def populate_laps_list(self):
         """Puebla la lista de vueltas"""
         self.laps_list.clear()
         
-        for lap_num in sorted(self.laps_data.keys()):
-            lap_info = self.laps_data[lap_num]
-            lap_time = lap_info['lap_time']
+        if not self.analyzer:
+            return
+        
+        for lap_num in sorted(self.analyzer.laps.keys()):
+            lap_time = self.analyzer.get_lap_time(lap_num)
             
             minutes = int(lap_time // 60)
             seconds = lap_time % 60
             
-            item_text = f"Vuelta {lap_num}: {minutes:02d}:{seconds:06.3f}"
+            # Calcular delta vs mejor
+            if self.best_lap_num:
+                best_time = self.analyzer.get_lap_time(self.best_lap_num)
+                delta = lap_time - best_time
+                delta_str = f" (+{delta:.3f}s)" if delta > 0 else " (BEST)"
+            else:
+                delta_str = ""
+            
+            item_text = f"Vuelta {lap_num}: {minutes:02d}:{seconds:06.3f}{delta_str}"
             item = QListWidgetItem(item_text)
             item.setData(Qt.ItemDataRole.UserRole, lap_num)
             
+            # Resaltar mejor vuelta
+            if lap_num == self.best_lap_num:
+                item.setForeground(QColor(COLORS['accent_green']))
+            
             self.laps_list.addItem(item)
     
-    def update_timeline_range(self):
-        """Actualiza el rango del timeline"""
-        if not self.telemetry_data:
+    def on_lap_selection_changed(self):
+        """Cuando cambia la selección de vuelta"""
+        selected_items = self.laps_list.selectedItems()
+        
+        if selected_items:
+            self.selected_lap_num = selected_items[0].data(Qt.ItemDataRole.UserRole)
+            self.btn_analyze.setEnabled(True)
+        else:
+            self.selected_lap_num = None
+            self.btn_analyze.setEnabled(False)
+    
+    def on_segments_changed(self, value: int):
+        """Cuando cambia el número de segmentos"""
+        self.num_segments = value
+    
+    def on_sector_clicked(self, sector_idx: int):
+        """Cuando se hace click en un sector del mapa"""
+        if not self.delta_table or self.delta_table.rowCount() == 0:
             return
         
-        max_idx = len(self.telemetry_data) - 1
-        self.timeline_slider.setMaximum(max_idx)
-        
-        total_seconds = self.telemetry_data[-1].get('second', 0)
-        minutes = int(total_seconds // 60)
-        seconds = total_seconds % 60
-        
-        self.end_time_label.setText(f"{minutes:02d}:{seconds:05.2f}")
-    
-    def on_lap_selection_changed(self):
-        """Cuando cambia la selección de vueltas"""
-        self.selected_laps = []
-        
-        for item in self.laps_list.selectedItems():
-            lap_num = item.data(Qt.ItemDataRole.UserRole)
-            self.selected_laps.append(lap_num)
-        
-        self.update_charts()
-    
-    def select_all_laps(self):
-        """Selecciona todas las vueltas"""
-        self.laps_list.selectAll()
-    
-    def clear_lap_selection(self):
-        """Limpia la selección"""
-        self.laps_list.clearSelection()
+        # Seleccionar la fila correspondiente en la tabla
+        self.delta_table.selectRow(sector_idx)
+        self.delta_table.scrollToItem(self.delta_table.item(sector_idx, 0))
     
     def sort_laps(self):
         """Ordena las vueltas según criterio"""
+        if not self.analyzer:
+            return
+        
         sort_type = self.sort_combo.currentIndex()
         
         if sort_type == 0:
-            sorted_laps = sorted(self.laps_data.keys())
+            sorted_laps = sorted(self.analyzer.laps.keys())
         elif sort_type == 1:
-            sorted_laps = sorted(self.laps_data.keys(), 
-                               key=lambda x: self.laps_data[x]['lap_time'])
+            sorted_laps = sorted(self.analyzer.laps.keys(), 
+                               key=lambda x: self.analyzer.get_lap_time(x))
         else:
-            sorted_laps = sorted(self.laps_data.keys(), 
-                               key=lambda x: self.laps_data[x]['lap_time'], 
+            sorted_laps = sorted(self.analyzer.laps.keys(), 
+                               key=lambda x: self.analyzer.get_lap_time(x), 
                                reverse=True)
         
         self.laps_list.clear()
         for lap_num in sorted_laps:
-            lap_info = self.laps_data[lap_num]
-            lap_time = lap_info['lap_time']
+            lap_time = self.analyzer.get_lap_time(lap_num)
             minutes = int(lap_time // 60)
             seconds = lap_time % 60
             
-            item_text = f"Vuelta {lap_num}: {minutes:02d}:{seconds:06.3f}"
+            if self.best_lap_num:
+                best_time = self.analyzer.get_lap_time(self.best_lap_num)
+                delta = lap_time - best_time
+                delta_str = f" (+{delta:.3f}s)" if delta > 0 else " (BEST)"
+            else:
+                delta_str = ""
+            
+            item_text = f"Vuelta {lap_num}: {minutes:02d}:{seconds:06.3f}{delta_str}"
             item = QListWidgetItem(item_text)
             item.setData(Qt.ItemDataRole.UserRole, lap_num)
+            
+            if lap_num == self.best_lap_num:
+                item.setForeground(QColor(COLORS['accent_green']))
+            
             self.laps_list.addItem(item)
     
-    def on_timeline_changed(self, value: int):
-        """Cuando cambia el slider de timeline"""
-        self.current_time_index = value
-        
-        if not self.telemetry_data or value >= len(self.telemetry_data):
+    def analyze_selected_lap(self):
+        """Analiza la vuelta seleccionada vs la mejor"""
+        if not self.selected_lap_num or not self.analyzer or not self.best_lap_num:
             return
         
-        current_second = self.telemetry_data[value].get('second', 0)
-        minutes = int(current_second // 60)
-        seconds = current_second % 60
-        milliseconds = int((seconds % 1) * 1000)
-        
-        self.time_display.setText(f"{minutes:02d}:{int(seconds):02d}.{milliseconds:03d}")
-        
-        self.update_current_info(value)
-    
-    def update_current_info(self, index: int):
-        """Actualiza la información del punto actual"""
-        if index >= len(self.telemetry_data):
+        if self.selected_lap_num == self.best_lap_num:
+            QMessageBox.information(
+                self,
+                "Info",
+                "Esta es la mejor vuelta. Selecciona otra vuelta para comparar."
+            )
             return
         
-        record = self.telemetry_data[index]
-        telemetry = record.get('player_telemetry', {})
+        # Comparar vueltas
+        comparison = self.analyzer.compare_laps(
+            self.best_lap_num,
+            self.selected_lap_num,
+            self.num_segments
+        )
         
-        info_lines = []
-        info_lines.append(f"Vuelta: {record.get('lap_number', 'N/A')}")
-        info_lines.append(f"Velocidad: {telemetry.get('speed_kmh', 0):.1f} km/h")
-        info_lines.append(f"RPM: {telemetry.get('rpm', 0)}")
-        info_lines.append(f"Marcha: {telemetry.get('gear', 0)}")
-        
-        self.current_info_label.setText("\\n".join(info_lines))
-    
-    def update_charts(self):
-        """Actualiza todos los gráficos con las vueltas seleccionadas"""
-        if not self.selected_laps:
-            self.clear_all_charts()
-            return
-        
-        align_time = self.align_time_check.isChecked()
-        
-        colors = [
-            QColor(255, 68, 68),
-            QColor(68, 138, 255),
-            QColor(76, 209, 55),
-            QColor(255, 152, 0),
-            QColor(156, 39, 176),
-            QColor(0, 188, 212),
-            QColor(255, 235, 59),
-            QColor(121, 85, 72),
+        # Actualizar mapa con deltas
+        deltas = [seg['delta'] for seg in comparison]
+        sector_data = [
+            {
+                'avg_speed': seg['lap2_avg_speed'],
+                'min_speed': seg['lap2_min_speed']
+            }
+            for seg in comparison
         ]
+        self.track_map.set_sector_analysis(self.num_segments, deltas, sector_data)
         
-        self.update_speed_chart(colors, align_time)
-        self.update_rpm_chart(colors, align_time)
-    
-    def clear_all_charts(self):
-        """Limpia todos los gráficos"""
-        for chart_view in self.charts.values():
-            chart = chart_view.chart()
-            chart.removeAllSeries()
-    
-    def update_speed_chart(self, colors: List[QColor], align_time: bool):
-        """Actualiza gráfico de velocidad"""
-        chart_view = self.charts.get('speed_chart')
-        if not chart_view:
-            return
+        # Actualizar tabla
+        self.update_delta_table(comparison)
         
-        chart = chart_view.chart()
+        # Actualizar gráfico de deltas
+        self.update_delta_chart(comparison)
+        
+        # Actualizar gráfico de velocidades
+        self.update_speed_comparison(self.selected_lap_num)
+    
+    def update_delta_table(self, comparison: List[Dict]):
+        """Actualiza la tabla de deltas"""
+        self.delta_table.setRowCount(len(comparison))
+        
+        for i, seg in enumerate(comparison):
+            # Sector
+            self.delta_table.setItem(i, 0, QTableWidgetItem(str(seg['segment'])))
+            
+            # Zona
+            self.delta_table.setItem(i, 1, QTableWidgetItem(seg['percentage']))
+            
+            # Delta
+            delta_str = f"+{seg['delta']:.3f}s" if seg['delta'] > 0 else f"{seg['delta']:.3f}s"
+            delta_item = QTableWidgetItem(delta_str)
+            if seg['delta'] > 0:
+                delta_item.setForeground(QColor(255, 68, 68))  # Rojo si pierdes
+            else:
+                delta_item.setForeground(QColor(76, 209, 55))  # Verde si ganas
+            self.delta_table.setItem(i, 2, delta_item)
+            
+            # Acumulado
+            cumul_str = f"+{seg['cumulative_delta']:.3f}s" if seg['cumulative_delta'] > 0 else f"{seg['cumulative_delta']:.3f}s"
+            cumul_item = QTableWidgetItem(cumul_str)
+            if seg['cumulative_delta'] > 0:
+                cumul_item.setForeground(QColor(255, 152, 0))
+            self.delta_table.setItem(i, 3, cumul_item)
+            
+            # Velocidad media
+            speed_diff = seg['speed_diff']
+            speed_str = f"{speed_diff:+.1f} km/h"
+            speed_item = QTableWidgetItem(speed_str)
+            if speed_diff < 0:
+                speed_item.setForeground(QColor(255, 68, 68))
+            self.delta_table.setItem(i, 4, speed_item)
+            
+            # Velocidad mínima
+            min_speed_str = f"{seg['lap2_min_speed']:.1f} km/h"
+            self.delta_table.setItem(i, 5, QTableWidgetItem(min_speed_str))
+    
+    def update_delta_chart(self, comparison: List[Dict]):
+        """Actualiza el gráfico de barras de deltas"""
+        chart = self.delta_chart_view.chart()
         chart.removeAllSeries()
         
-        for i, lap_num in enumerate(self.selected_laps):
-            lap_data = self.laps_data[lap_num]['data']
-            
-            series = QLineSeries()
-            series.setName(f"Vuelta {lap_num}")
-            
-            color = colors[i % len(colors)]
-            pen = QPen(color)
-            pen.setWidth(2)
-            series.setPen(pen)
-            
-            for j, record in enumerate(lap_data):
-                telemetry = record.get('player_telemetry', {})
-                speed = telemetry.get('speed_kmh', 0)
-                
-                if align_time:
-                    x = j * 0.1
-                else:
-                    x = record.get('second', 0)
-                
-                series.append(x, speed)
-            
-            chart.addSeries(series)
-            series.attachAxis(chart.axes(Qt.Orientation.Horizontal)[0])
-            series.attachAxis(chart.axes(Qt.Orientation.Vertical)[0])
+        # Crear barras
+        positive_set = QBarSet("Pierdes tiempo")
+        negative_set = QBarSet("Ganas tiempo")
         
-        self.adjust_chart_axes(chart)
+        positive_set.setColor(QColor(255, 68, 68))
+        negative_set.setColor(QColor(76, 209, 55))
+        
+        categories = []
+        
+        for seg in comparison:
+            categories.append(f"S{seg['segment']}")
+            
+            if seg['delta'] > 0:
+                positive_set.append(seg['delta'])
+                negative_set.append(0)
+            else:
+                positive_set.append(0)
+                negative_set.append(abs(seg['delta']))
+        
+        series = QBarSeries()
+        series.append(positive_set)
+        series.append(negative_set)
+        
+        chart.addSeries(series)
+        chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+        
+        # Eje X con categorías
+        axis_x = QBarCategoryAxis()
+        axis_x.append(categories)
+        chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
+        series.attachAxis(axis_x)
+        
+        # Eje Y
+        axis_y = QValueAxis()
+        axis_y.setTitleText("Delta (segundos)")
+        chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
+        series.attachAxis(axis_y)
     
-    def update_rpm_chart(self, colors: List[QColor], align_time: bool):
-        """Actualiza gráfico de RPM"""
-        chart_view = self.charts.get('rpm_chart')
-        if not chart_view:
-            return
-        
-        chart = chart_view.chart()
+    def update_speed_comparison(self, lap_num: int):
+        """Actualiza gráfico de comparación de velocidades"""
+        chart = self.speed_comparison_chart.chart()
         chart.removeAllSeries()
         
-        for i, lap_num in enumerate(self.selected_laps):
-            lap_data = self.laps_data[lap_num]['data']
-            
-            series = QLineSeries()
-            series.setName(f"Vuelta {lap_num}")
-            
-            color = colors[i % len(colors)]
-            pen = QPen(color)
-            pen.setWidth(2)
-            series.setPen(pen)
-            
-            for j, record in enumerate(lap_data):
-                telemetry = record.get('player_telemetry', {})
-                rpm = telemetry.get('rpm', 0)
-                
-                if align_time:
-                    x = j * 0.1
-                else:
-                    x = record.get('second', 0)
-                
-                series.append(x, rpm)
-            
-            chart.addSeries(series)
-            series.attachAxis(chart.axes(Qt.Orientation.Horizontal)[0])
-            series.attachAxis(chart.axes(Qt.Orientation.Vertical)[0])
+        # Serie de mejor vuelta
+        best_series = QLineSeries()
+        best_series.setName(f"Vuelta #{self.best_lap_num} (Mejor)")
+        best_pen = QPen(QColor(76, 209, 55))
+        best_pen.setWidth(2)
+        best_series.setPen(best_pen)
         
-        self.adjust_chart_axes(chart)
-    
-    def adjust_chart_axes(self, chart: QChart):
-        """Ajusta los ejes del gráfico automáticamente"""
-        if not chart.series():
-            return
-        
-        min_x = float('inf')
-        max_x = float('-inf')
-        min_y = float('inf')
-        max_y = float('-inf')
-        
-        for series in chart.series():
-            if not isinstance(series, QLineSeries):
-                continue
+        best_lap_records = self.analyzer.laps[self.best_lap_num]
+        for record in best_lap_records:
+            session = record.get('session_info', {})
+            player = record.get('player_telemetry', {})
             
-            points = series.pointsVector()
-            for point in points:
-                min_x = min(min_x, point.x())
-                max_x = max(max_x, point.x())
-                min_y = min(min_y, point.y())
-                max_y = max(max_y, point.y())
+            pos = session.get('normalized_position', 0.0) * 100
+            speed = player.get('speed_kmh', 0)
+            
+            best_series.append(pos, speed)
         
-        if min_x != float('inf') and max_x != float('-inf'):
-            x_axis = chart.axes(Qt.Orientation.Horizontal)[0]
-            x_axis.setRange(min_x, max_x)
+        # Serie de vuelta seleccionada
+        lap_series = QLineSeries()
+        lap_series.setName(f"Vuelta #{lap_num}")
+        lap_pen = QPen(QColor(255, 68, 68))
+        lap_pen.setWidth(2)
+        lap_series.setPen(lap_pen)
         
-        if min_y != float('inf') and max_y != float('-inf'):
-            y_axis = chart.axes(Qt.Orientation.Vertical)[0]
-            margin = (max_y - min_y) * 0.1
-            y_axis.setRange(min_y - margin, max_y + margin)
+        lap_records = self.analyzer.laps[lap_num]
+        for record in lap_records:
+            session = record.get('session_info', {})
+            player = record.get('player_telemetry', {})
+            
+            pos = session.get('normalized_position', 0.0) * 100
+            speed = player.get('speed_kmh', 0)
+            
+            lap_series.append(pos, speed)
+        
+        chart.addSeries(best_series)
+        chart.addSeries(lap_series)
+        
+        # Conectar ejes
+        best_series.attachAxis(chart.axes(Qt.Orientation.Horizontal)[0])
+        best_series.attachAxis(chart.axes(Qt.Orientation.Vertical)[0])
+        lap_series.attachAxis(chart.axes(Qt.Orientation.Horizontal)[0])
+        lap_series.attachAxis(chart.axes(Qt.Orientation.Vertical)[0])
+        
+        # Ajustar ejes
+        chart.axes(Qt.Orientation.Horizontal)[0].setRange(0, 100)

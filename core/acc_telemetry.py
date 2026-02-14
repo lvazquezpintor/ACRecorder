@@ -1,15 +1,7 @@
 """
 ACC Telemetry Module - Interfaz para leer datos de Assetto Corsa Competizione
 Utiliza memoria compartida (Shared Memory) para acceder a los datos del juego
-
-NOTA IMPORTANTE SOBRE OFFSETS:
-- Los offsets en este módulo están basados en la documentación oficial de ACC Shared Memory
-- La estructura Physics contiene:
-  * Offset 92-108: wheelsPressure (presiones en PSI) - CORREGIDO
-  * Offset 156-172: tyreCoreTemperature (temperaturas en °C) - CORREGIDO
-  * Los offsets anteriores estaban incorrectos, causando que las presiones mostraran 0.0
-- Las temperaturas de frenos (brakeTempCore) requieren verificación del offset exacto
-  según la versión de ACC instalada
+CORREGIDO según estructuras C++ de ACC con #pragma pack(4)
 """
 
 import mmap
@@ -35,10 +27,10 @@ class ACCTelemetry:
         """Conecta con la memoria compartida de ACC"""
         try:
             if not self.connected:
-                # Intentar abrir las memorias compartidas
-                self.physics_handle = mmap.mmap(-1, 1024, self.PHYSICS_MAP)
-                self.graphics_handle = mmap.mmap(-1, 1024, self.GRAPHICS_MAP)
-                self.static_handle = mmap.mmap(-1, 1024, self.STATIC_MAP)
+                # Aumentar tamaño del buffer para seguridad
+                self.physics_handle = mmap.mmap(-1, 4096, self.PHYSICS_MAP)
+                self.graphics_handle = mmap.mmap(-1, 4096, self.GRAPHICS_MAP)
+                self.static_handle = mmap.mmap(-1, 4096, self.STATIC_MAP)
                 self.connected = True
             return True
         except Exception as e:
@@ -62,16 +54,37 @@ class ACCTelemetry:
             
         try:
             self.graphics_handle.seek(0)
-            data = self.graphics_handle.read(1024)
+            data = self.graphics_handle.read(4096)
             
-            # Parsear datos básicos de Graphics (estructura simplificada)
-            # Offset 0: PacketId (int)
-            # Offset 4: AC_STATUS (int)
-            # Offset 8: AC_SESSION_TYPE (int)
+            offset = 0
             
-            packet_id = struct.unpack('i', data[0:4])[0]
-            status = struct.unpack('i', data[4:8])[0]
-            session_type = struct.unpack('i', data[8:12])[0]
+            packet_id = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            status = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            session = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            
+            # wchar_t[15] = 30 bytes
+            current_time = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
+            last_time = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
+            best_time = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
+            split = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
+            
+            completed_laps = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            position = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            i_current_time = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            i_last_time = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            i_best_time = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            session_time_left = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            distance_traveled = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            is_in_pit = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            current_sector = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            last_sector_time = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            number_of_laps = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            
+            # wchar_t[33] = 66 bytes
+            tyre_compound = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            
+            offset += 4  # replayMult
+            normalized_pos = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
             session_types = {
                 0: 'Unknown',
@@ -91,36 +104,25 @@ class ACCTelemetry:
                 3: 'Pause'
             }
             
-            # Más datos de Graphics
-            # Offset 12: currentTime (int) - milisegundos
-            # Offset 16: lastTime (int)
-            # Offset 20: bestTime (int)
-            
-            current_time = struct.unpack('i', data[12:16])[0]
-            last_time = struct.unpack('i', data[16:20])[0]
-            best_time = struct.unpack('i', data[20:24])[0]
-            
-            # Offset 24: completedLaps (int) - Vueltas completadas
-            completed_laps = struct.unpack('i', data[24:28])[0]
-            
-            # Offset 28: position (int) - Posición en carrera
-            position = struct.unpack('i', data[28:32])[0]
-            
-            # Offset 48: normalizedCarPosition (float) - Posición en el circuito (0.0 - 1.0)
-            # 0.0 = línea de meta, 0.5 = mitad del circuito, 1.0 = vuelta completa
-            normalized_position = struct.unpack('f', data[48:52])[0]
-            
             return {
                 'packet_id': packet_id,
                 'status': statuses.get(status, 'Unknown'),
-                'session_type': session_types.get(session_type, 'Unknown'),
-                'current_time_ms': current_time,
-                'last_lap_time_ms': last_time,
-                'best_lap_time_ms': best_time,
+                'session_type': session_types.get(session, 'Unknown'),
+                'current_time': current_time,
+                'last_time': last_time,
+                'best_time': best_time,
+                'current_time_ms': i_current_time,
+                'last_lap_time_ms': i_last_time,
+                'best_lap_time_ms': i_best_time,
                 'completed_laps': completed_laps,
                 'position': position,
-                'normalized_position': round(normalized_position, 4),  # Posición 0.0-1.0 en el circuito
-                'is_valid_lap': data[52] == 1,  # Offset 52: isValidLap (byte)
+                'normalized_position': round(normalized_pos, 4),
+                'session_time_left': round(session_time_left, 1),
+                'distance_traveled': round(distance_traveled, 1),
+                'is_in_pit': bool(is_in_pit),
+                'current_sector': current_sector,
+                'tyre_compound': tyre_compound,
+                'number_of_laps': number_of_laps
             }
             
         except Exception as e:
@@ -135,12 +137,6 @@ class ACCTelemetry:
         try:
             # ACC no expone standings completos en Shared Memory básica
             # Esto requeriría la API de Broadcasting
-            # Por ahora retornamos datos simulados o parciales
-            
-            # En una implementación real, necesitarías:
-            # 1. Implementar ACC Broadcasting SDK
-            # 2. O usar archivos de resultados de ACC
-            
             return [
                 {
                     'position': 1,
@@ -156,103 +152,130 @@ class ACCTelemetry:
             return []
     
     def get_player_telemetry(self) -> Optional[Dict]:
-        """Obtiene telemetría del coche del jugador"""
+        """Obtiene telemetría del coche del jugador según estructura C++ con pack(4)"""
         if not self.connected:
             return None
         
         try:
             self.physics_handle.seek(0)
-            physics_data = self.physics_handle.read(1024)
+            data = self.physics_handle.read(4096)
             
-            # Estructura simplificada de Physics
-            # Todos los floats son de 4 bytes
+            offset = 0
             
-            # Offset 0: PacketId (int)
-            packet_id = struct.unpack('i', physics_data[0:4])[0]
+            # Estructura C++ exacta con pack(4)
+            packet_id = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            gas = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            brake = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            fuel = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            gear = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            rpms = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            steer_angle = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            speed_kmh = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Offset 4: Gas (float)
-            gas = struct.unpack('f', physics_data[4:8])[0]
+            # velocity[3]
+            velocity_x = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            velocity_y = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            velocity_z = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Offset 8: Brake (float)
-            brake = struct.unpack('f', physics_data[8:12])[0]
+            # accG[3]
+            accg_x = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            accg_y = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            accg_z = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Offset 12: Fuel (float)
-            fuel = struct.unpack('f', physics_data[12:16])[0]
+            # wheelSlip[4]
+            wheel_slip_fl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            wheel_slip_fr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            wheel_slip_rl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            wheel_slip_rr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Offset 16-28: Gear (int), RPM (int), SteerAngle (float)
-            gear = struct.unpack('i', physics_data[16:20])[0]
-            rpm = struct.unpack('i', physics_data[20:24])[0]
-            steer_angle = struct.unpack('f', physics_data[24:28])[0]
+            # wheelLoad[4]
+            wheel_load_fl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            wheel_load_fr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            wheel_load_rl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            wheel_load_rr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Offset 28: SpeedKmh (float)
-            speed_kmh = struct.unpack('f', physics_data[28:32])[0]
+            # wheelsPressure[4]
+            tyre_pressure_fl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            tyre_pressure_fr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            tyre_pressure_rl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            tyre_pressure_rr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Offset 32-44: Velocity (vec3 floats: x, y, z)
-            velocity_x = struct.unpack('f', physics_data[32:36])[0]
-            velocity_y = struct.unpack('f', physics_data[36:40])[0]
-            velocity_z = struct.unpack('f', physics_data[40:44])[0]
+            # wheelAngularSpeed[4]
+            wheel_angular_fl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            wheel_angular_fr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            wheel_angular_rl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            wheel_angular_rr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Offset 44-60: AccG (vec3 floats: x, y, z) - Aceleración en G
-            accg_x = struct.unpack('f', physics_data[44:48])[0]
-            accg_y = struct.unpack('f', physics_data[48:52])[0]
-            accg_z = struct.unpack('f', physics_data[52:56])[0]
+            # tyreWear[4]
+            tyre_wear_fl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            tyre_wear_fr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            tyre_wear_rl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            tyre_wear_rr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Estructura de Physics según documentación oficial de ACC:
-            # Offset 60-76: wheelSlip (4 floats: FL, FR, RL, RR) - Deslizamiento de ruedas
-            # Valores > 1.0 indican bloqueo/deslizamiento
-            wheel_slip_fl = struct.unpack('f', physics_data[60:64])[0]
-            wheel_slip_fr = struct.unpack('f', physics_data[64:68])[0]
-            wheel_slip_rl = struct.unpack('f', physics_data[68:72])[0]
-            wheel_slip_rr = struct.unpack('f', physics_data[72:76])[0]
+            # tyreDirtyLevel[4]
+            offset += 16  # Saltar dirty level
             
-            # Offset 76-92: wheelLoad (4 floats) - Carga de ruedas en kg
-            wheel_load_fl = struct.unpack('f', physics_data[76:80])[0]
-            wheel_load_fr = struct.unpack('f', physics_data[80:84])[0]
-            wheel_load_rl = struct.unpack('f', physics_data[84:88])[0]
-            wheel_load_rr = struct.unpack('f', physics_data[88:92])[0]
+            # tyreCoreTemperature[4]
+            tyre_temp_fl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            tyre_temp_fr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            tyre_temp_rl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            tyre_temp_rr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Offset 92-108: wheelsPressure (4 floats) - Presiones de ruedas en PSI
-            tyre_pressure_fl = struct.unpack('f', physics_data[92:96])[0]
-            tyre_pressure_fr = struct.unpack('f', physics_data[96:100])[0]
-            tyre_pressure_rl = struct.unpack('f', physics_data[100:104])[0]
-            tyre_pressure_rr = struct.unpack('f', physics_data[104:108])[0]
+            # camberRAD[4]
+            offset += 16
             
-            # Offset 108-124: wheelAngularSpeed (4 floats) - Velocidad angular de ruedas rad/s
-            wheel_angular_fl = struct.unpack('f', physics_data[108:112])[0]
-            wheel_angular_fr = struct.unpack('f', physics_data[112:116])[0]
-            wheel_angular_rl = struct.unpack('f', physics_data[116:120])[0]
-            wheel_angular_rr = struct.unpack('f', physics_data[120:124])[0]
+            # suspensionTravel[4]
+            susp_travel_fl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            susp_travel_fr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            susp_travel_rl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            susp_travel_rr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Offset 124-140: tyreWear (4 floats) - Desgaste de neumáticos
-            tyre_wear_fl = struct.unpack('f', physics_data[124:128])[0]
-            tyre_wear_fr = struct.unpack('f', physics_data[128:132])[0]
-            tyre_wear_rl = struct.unpack('f', physics_data[132:136])[0]
-            tyre_wear_rr = struct.unpack('f', physics_data[136:140])[0]
+            offset += 4  # drs
+            tc = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            heading = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            pitch = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            roll = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            offset += 4  # cgHeight
             
-            # Offset 140-156: tyreDirtyLevel (4 floats) - Nivel de suciedad de neumáticos
-            # Offset 156-172: tyreCoreTemperature (4 floats) - Temperatura núcleo de neumáticos °C
-            tyre_temp_fl = struct.unpack('f', physics_data[156:160])[0]
-            tyre_temp_fr = struct.unpack('f', physics_data[160:164])[0]
-            tyre_temp_rl = struct.unpack('f', physics_data[164:168])[0]
-            tyre_temp_rr = struct.unpack('f', physics_data[168:172])[0]
+            # carDamage[5]
+            offset += 20
             
-            # Offset 172-188: camberRAD (4 floats) - Ángulo de camber en radianes
-            # Offset 188-204: suspensionTravel (4 floats) - Recorrido de suspensión en metros
+            offset += 4  # tyresOut
+            offset += 4  # pitLimiter
+            abs_level = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
             
-            # Offset 204-220: drs (float), tc (float), heading (float), pitch (float), roll (float)
-            # ...
+            # kersCharge, kersInput (not used in ACC)
+            offset += 8
             
-            # Offset variable: brakeTempCore (4 floats) - Necesitamos calcular offset correcto
-            # Según documentación: después de muchos otros campos
-            # Por ahora, usaremos valores dummy para temperaturas de frenos
-            # TODO: Verificar offset correcto en documentación actualizada
-            brake_temp_fl = 0.0
-            brake_temp_fr = 0.0
-            brake_temp_rl = 0.0
-            brake_temp_rr = 0.0
+            offset += 4  # autoShifter
             
-            # Detectar bloqueos de rueda (cuando slip > umbral)
-            # Valores típicos: < 1.0 = normal, > 1.2 = deslizamiento, > 2.0 = bloqueo severo
+            # rideHeight[2]
+            offset += 8
+            
+            turbo_boost = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            offset += 4  # ballast
+            air_density = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            air_temp = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            road_temp = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            # localAngularVel[3]
+            offset += 12
+            
+            offset += 4  # finalFF
+            offset += 4  # perfMeter
+            
+            # engineBrake, ers fields (not used in ACC) - 6 ints + 1 float = 28 bytes
+            offset += 28
+            
+            # brakeTemp[4]
+            brake_temp_fl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            brake_temp_fr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            brake_temp_rl = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            brake_temp_rr = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            clutch = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            # Detectar bloqueos de rueda
             wheel_lock_fl = wheel_slip_fl > 1.2
             wheel_lock_fr = wheel_slip_fr > 1.2
             wheel_lock_rl = wheel_slip_rl > 1.2
@@ -264,7 +287,7 @@ class ACCTelemetry:
                 'brake': round(brake, 3),
                 'fuel': round(fuel, 2),
                 'gear': gear,
-                'rpm': rpm,
+                'rpm': rpms,
                 'steer_angle': round(steer_angle, 2),
                 'speed_kmh': round(speed_kmh, 1),
                 'velocity': {
@@ -273,9 +296,9 @@ class ACCTelemetry:
                     'z': round(velocity_z, 2)
                 },
                 'g_force': {
-                    'lateral': round(accg_x, 2),  # Gs laterales
-                    'longitudinal': round(accg_z, 2),  # Gs de frenada/aceleración
-                    'vertical': round(accg_y, 2)  # Gs verticales
+                    'lateral': round(accg_x, 2),
+                    'longitudinal': round(accg_z, 2),
+                    'vertical': round(accg_y, 2)
                 },
                 'tyres': {
                     'slip': {
@@ -328,7 +351,31 @@ class ACCTelemetry:
                         'rear_left': round(brake_temp_rl, 1),
                         'rear_right': round(brake_temp_rr, 1)
                     }
-                }
+                },
+                'suspension': {
+                    'travel': {
+                        'front_left': round(susp_travel_fl, 3),
+                        'front_right': round(susp_travel_fr, 3),
+                        'rear_left': round(susp_travel_rl, 3),
+                        'rear_right': round(susp_travel_rr, 3)
+                    }
+                },
+                'electronics': {
+                    'tc': round(tc, 2),
+                    'abs': round(abs_level, 2),
+                    'clutch': round(clutch, 2)
+                },
+                'orientation': {
+                    'heading': round(heading, 2),
+                    'pitch': round(pitch, 2),
+                    'roll': round(roll, 2)
+                },
+                'environment': {
+                    'air_temp': round(air_temp, 1),
+                    'road_temp': round(road_temp, 1),
+                    'air_density': round(air_density, 3)
+                },
+                'turbo_boost': round(turbo_boost, 2)
             }
             
         except Exception as e:
@@ -336,37 +383,54 @@ class ACCTelemetry:
             return None
     
     def get_car_info(self) -> Optional[Dict]:
-        """Obtiene información estática del coche"""
+        """Obtiene información estática del coche según estructura C++ con pack(4)"""
         if not self.connected:
             return None
         
         try:
             self.static_handle.seek(0)
-            static_data = self.static_handle.read(1024)
+            data = self.static_handle.read(4096)
             
-            # Información estática básica
-            max_rpm = struct.unpack('i', static_data[4:8])[0]
-            max_fuel = struct.unpack('f', static_data[8:12])[0]
+            offset = 0
             
-            # Nombre del coche (string en offset 12, 50 chars)
-            car_model = static_data[12:62].decode('utf-8', errors='ignore').rstrip('\x00')
+            # wchar_t[15] = 30 bytes
+            sm_version = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
+            ac_version = data[offset:offset+30].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 30
             
-            # Nombre de la pista (string en offset 62, 50 chars)
-            track_name = static_data[62:112].decode('utf-8', errors='ignore').rstrip('\x00')
+            num_sessions = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            num_cars = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
             
-            # Offset aproximado 116: trackSPlineLength (float) - Longitud del circuito en metros
-            # Este offset puede variar según la versión de ACC
-            try:
-                track_length = struct.unpack('f', static_data[116:120])[0]
-            except:
-                track_length = 0.0  # Si no se puede leer, usar 0
+            # wchar_t[33] = 66 bytes
+            car_model = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            track = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            player_name = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            player_surname = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            player_nick = data[offset:offset+66].decode('utf-16-le', errors='ignore').rstrip('\x00'); offset += 66
+            
+            sector_count = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            offset += 4  # maxTorque
+            offset += 4  # maxPower
+            max_rpm = struct.unpack('i', data[offset:offset+4])[0]; offset += 4
+            max_fuel = struct.unpack('f', data[offset:offset+4])[0]; offset += 4
+            
+            # suspensionMaxTravel[4]
+            offset += 16
+            
+            # tyreRadius[4]
+            offset += 16
             
             return {
+                'sm_version': sm_version,
+                'ac_version': ac_version,
                 'car_model': car_model,
-                'track_name': track_name,
-                'track_length_m': round(track_length, 1),  # Longitud del circuito en metros
+                'track_name': track,
+                'player_name': f"{player_name} {player_surname}".strip(),
+                'player_nick': player_nick,
                 'max_rpm': max_rpm,
-                'max_fuel': round(max_fuel, 1)
+                'max_fuel': round(max_fuel, 1),
+                'num_sessions': num_sessions,
+                'num_cars': num_cars,
+                'sector_count': sector_count
             }
             
         except Exception as e:
